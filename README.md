@@ -1,11 +1,13 @@
 # OSS 저장소 헬스체크 대시보드
 
+[![CI](https://github.com/solremifa/oss-health-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/solremifa/oss-health-dashboard/actions/workflows/ci.yml)
+
 오픈소스 저장소의 이슈를 수집·분석해 **"이 프로젝트가 지금 건강한가"** 를 정량 지표와
 LLM 분석으로 보여주는 도구입니다.
 
 분석 대상: [`PrefectHQ/fastmcp`](https://github.com/PrefectHQ/fastmcp)
 
-> **개발 진행 중** — 현재 M0(프로젝트 기반) 단계입니다. [진행 상황](#진행-상황) 참고.
+> **개발 진행 중** — M0(프로젝트 기반)까지 완료했습니다. [진행 상황](#진행-상황) 참고.
 
 ## 왜 만들었나
 
@@ -132,7 +134,7 @@ ETag 조건부 요청, 레이트리밋 백오프를 PyGithub은 내부에 감춥
 ### 2. 설치
 
 ```bash
-git clone https://github.com/<owner>/oss-health-dashboard.git
+git clone https://github.com/solremifa/oss-health-dashboard.git
 cd oss-health-dashboard
 python -m venv .venv
 ```
@@ -178,7 +180,7 @@ _대시보드 구현 후 스크린샷과 GIF가 들어갈 자리입니다._
 | 마일스톤 | 내용 | 상태 |
 |---|---|---|
 | 0단계 | GitHub API 사전 조사 ([findings.md](docs/findings.md)) | 완료 |
-| M0 | 프로젝트 기반 · CI | 진행 중 |
+| M0 | 프로젝트 기반 · CI | 완료 |
 | M1 | 수집 계층 (클라이언트 · 페이지네이션 · 검증) | 예정 |
 | M2 | 저장 계층 (모델 · 마이그레이션 · 증분 수집) | 예정 |
 | M3 | 분석 계층 (LLM 분류 · 지표 계산) | 예정 |

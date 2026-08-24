@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 같은 브랜치에 연속으로 push하면 이전 실행을 취소한다.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: ruff check
+        run: python -m ruff check --output-format=github .
+
+      - name: ruff format --check
+        run: python -m ruff format --check .
+
+  test:
+    name: pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 한쪽이 깨져도 다른 쪽 결과를 봐야 플랫폼 문제인지 아닌지 알 수 있다.
+      fail-fast: false
+      matrix:
+        # Windows를 함께 도는 이유: 이 프로젝트는 인코딩 문제를 여러 번 밟았다
+        # (docs/findings.md 함정 6). 개발은 Windows(cp949), 배포·CI는 Linux라
+        # 한쪽에서만 돌리면 인코딩 회귀를 놓친다.
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # 테스트는 네트워크와 API 키에 의존하지 않는다. GitHub API도 Anthropic API도
+      # 호출하지 않으므로 secrets가 필요 없고, 포크에서 온 PR에서도 그대로 돈다.
+      - name: pytest
+        run: python -m pytest -q
