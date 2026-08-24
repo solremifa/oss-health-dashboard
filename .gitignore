@@ -1,0 +1,24 @@
+# 환경변수. GITHUB_TOKEN, ANTHROPIC_API_KEY 등 비밀값이 들어간다.
+# .env.example만 커밋하고 .env는 절대 커밋하지 않는다.
+.env
+
+# 가상환경
+.venv/
+
+# 파이썬 캐시·바이트코드
+__pycache__/
+*.py[cod]
+
+# 빌드 산출물 (editable 설치가 만든다)
+*.egg-info/
+
+# 테스트·린트 캐시
+.pytest_cache/
+.ruff_cache/
+
+# 로컬 개발 DB. 스키마는 migrations/가 진실이므로 언제든 다시 만들 수 있다.
+oss_health.db
+# SQLite가 트랜잭션 중에 만드는 사이드카 파일
+oss_health.db-journal
+oss_health.db-wal
+oss_health.db-shm

@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oss-health-dashboard"
+version = "0.1.0"
+description = "OSS 저장소 이슈를 수집·분석해 프로젝트 건강도를 보여주는 대시보드"
+# 이 PC에 3.11이 없어 3.12로 확정. (요구 사항은 3.11+)
+requires-python = ">=3.12"
+
+# 실제로 import하는 것만 올린다.
+dependencies = [
+    "alembic>=1.19,<2",
+    "anthropic>=1,<2",
+    "fastapi>=0.141,<1",
+    # GitHub API를 직접 호출한다. PyGithub을 쓰지 않는 이유는 CLAUDE.md 참고.
+    # httpx는 deprecated이며 후속 배포판이 httpx2다. anthropic 1.x도 httpx2 기반.
+    "httpx2>=2.12,<3",
+    "pydantic>=2.13,<3",
+    # 설정 누락을 실행 시점이 아니라 기동 시점에 잡기 위해 쓴다.
+    # 개발 편의가 아니라 app/config.py가 직접 import하므로 런타임 의존성이다.
+    "pydantic-settings>=2.15,<3",
+    "sqlalchemy>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1,<10",
+    "ruff>=0.16,<1",
+    # 개발 서버. 운영 배포 방식이 정해지면 그때 런타임 의존성으로 옮긴다.
+    "uvicorn[standard]>=0.52,<1",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# ruff는 마크다운 안의 코드 블록도 포맷한다. docs/findings.md의 예제는 주석을
+# 세로로 맞춰 읽히도록 쓴 것이라 자동 포맷이 오히려 가독성을 해친다.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort — import 순서
+    "UP",   # pyupgrade — 낡은 문법
+    "B",    # flake8-bugbear
+    "ANN",  # flake8-annotations — 타입힌트 필수 규약을 린트로 강제
+    "T20",  # flake8-print — print() 대신 로깅을 쓰게 한다
+    "RUF",
+]
+ignore = [
+    "ANN401",  # Any 허용 — 외부 API 응답 등 불가피한 지점이 있다
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 테스트에서는 픽스처 반환 타입까지 강제하지 않는다.
+"tests/*" = ["ANN201", "ANN001"]
+# 사람이 직접 돌리는 스크립트는 결과를 stdout으로 출력한다.
+"scripts/*" = ["T20"]
