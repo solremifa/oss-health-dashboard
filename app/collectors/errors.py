@@ -69,6 +69,53 @@ class RateLimitError(CollectorError):
         self.url = url
 
 
+class PaginationLimitError(CollectorError):
+    """페이지 상한까지 받았는데도 `rel="next"`가 계속 나오는 경우.
+
+    여기서 조용히 멈추면 **일부만 수집한 데이터로 지표를 계산하게 된다.** 방치율도
+    응답 속도도 표본이 잘린 채 그럴듯한 숫자로 나오고, 틀렸다는 사실조차 드러나지
+    않는다. 그래서 잘라내지 않고 예외를 올린다.
+
+    Attributes:
+        max_pages: 허용한 페이지 수.
+        url: 페이지네이션을 시작한 URL.
+    """
+
+    def __init__(self, max_pages: int, url: str) -> None:
+        """예외를 만든다.
+
+        Args:
+            max_pages: 허용한 페이지 수.
+            url: 페이지네이션을 시작한 URL.
+        """
+        super().__init__(
+            f"페이지 상한({max_pages})을 넘겼는데도 다음 페이지가 남아 있습니다: {url}. "
+            "일부만 수집한 채로 진행하지 않습니다."
+        )
+        self.max_pages = max_pages
+        self.url = url
+
+
+class PaginationLoopError(CollectorError):
+    """`rel="next"`가 방금 요청한 URL을 그대로 가리키는 경우.
+
+    상한에 닿을 때까지 두면 같은 요청을 수십 번 반복하며 레이트리밋만 태운다.
+    한 바퀴 만에 알아채고 멈춘다.
+
+    Attributes:
+        url: 자기 자신을 가리킨 URL.
+    """
+
+    def __init__(self, url: str) -> None:
+        """예외를 만든다.
+
+        Args:
+            url: 자기 자신을 가리킨 URL.
+        """
+        super().__init__(f'rel="next"가 방금 요청한 URL을 그대로 가리킵니다: {url}')
+        self.url = url
+
+
 class RetryLimitExceededError(CollectorError):
     """재시도 상한까지 시도했는데도 실패한 경우.
 
