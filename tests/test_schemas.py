@@ -16,6 +16,7 @@ from app.collectors.schemas import (
     parse_comments,
     parse_issues,
 )
+from app.models import IssueState
 
 
 def _issue(**overrides: Any) -> dict[str, Any]:
@@ -435,3 +436,51 @@ def test_labels_are_immutable():
     issue = parse_issues([_issue(labels=["bug"])]).issues[0]
 
     assert isinstance(issue.labels, tuple)
+
+
+# ---------------------------------------------------------------------------
+# 저장 계층으로의 변환 — 의존 방향 때문에 이쪽에 있다
+# ---------------------------------------------------------------------------
+
+
+def test_to_record_maps_every_stored_field():
+    issue = parse_issues([_issue(labels=[{"id": 1, "name": "bug"}])]).issues[0]
+
+    record = issue.to_record("PrefectHQ/fastmcp")
+
+    assert record.id == issue.id
+    assert record.repo_full_name == "PrefectHQ/fastmcp"
+    assert record.number == issue.number
+    assert record.title == issue.title
+    assert record.body == issue.body
+    assert record.state_reason == issue.state_reason
+    assert record.created_at == issue.created_at
+    assert record.updated_at == issue.updated_at
+    assert record.closed_at == issue.closed_at
+    assert record.author_association == issue.author_association
+    assert record.labels == ("bug",)
+
+
+def test_to_record_renames_comments_to_comments_count():
+    """API의 `comments`는 개수다. DB에서 코멘트 테이블과 헷갈리지 않게 이름을 바꾼다."""
+    issue = parse_issues([_issue(comments=7)]).issues[0]
+
+    assert issue.to_record("o/r").comments_count == 7
+
+
+def test_to_record_converts_state_to_the_db_enum():
+    """DB는 문자열이 아니라 enum을 받는다. CHECK 제약이 값을 강제한다."""
+    issue = parse_issues([_issue(state="open")]).issues[0]
+
+    assert issue.to_record("o/r").state is IssueState.OPEN
+
+
+def test_to_record_flattens_the_author():
+    """작성자를 별도 테이블로 정규화하지 않는다. 필요한 건 세 필드뿐이다."""
+    issue = parse_issues([_issue(user={"login": "jlowin", "id": 153, "type": "User"})]).issues[0]
+
+    record = issue.to_record("o/r")
+
+    assert record.author_login == "jlowin"
+    assert record.author_id == 153
+    assert record.author_type == "User"

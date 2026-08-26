@@ -125,6 +125,11 @@ api ──→ analysis ──┘
   있지만, 핵심 변환 함수는 DB를 모르고 세션을 만지는 것은 배치 러너 하나뿐입니다.
 - `api/`는 모든 레이어를 쓸 수 있지만 스스로 로직을 갖지 않습니다.
 - 순환 import가 생기면 우회하지 말고 책임 배치를 다시 검토하세요.
+- **API 응답 스키마를 저장용 값 객체로 바꾸는 변환은 `collectors/`에 둡니다.**
+  `models/`가 `IssueSchema`를 알면 화살표가 양방향이 됩니다. `models/records.py`가
+  저장에 필요한 모양(`IssueRecord`, `SyncCursor`)을 정의하고, 수집 쪽이 거기에 맞춥니다.
+- **`collectors/sync.py`도 DB에 쓰지 않습니다.** 저장된 커서를 값으로 받아 새 커서를
+  값으로 돌려줄 뿐이고, 저장과 트랜잭션 경계는 호출자가 정합니다.
 
 ## 6. 수집 규칙 — docs/findings.md에서 온 것
 
@@ -167,6 +172,12 @@ api ──→ analysis ──┘
 - **제약에 NULL이 들어가는 컬럼을 쓰지 마세요.** NULL끼리는 서로 다르다고 보아
   UNIQUE가 조용히 무력화됩니다. API의 `body: null`은 `""`로 정규화해 NOT NULL로 둡니다.
 - **`repository`는 커밋하지 않습니다.** 트랜잭션 경계는 호출자가 정합니다.
+  이슈 저장과 커서 전진이 **같은 트랜잭션**이어야 "저장은 됐는데 커서는 안 갔다"와
+  그 반대가 생기지 않습니다. 뒤쪽이 더 나쁩니다 — 커서만 앞서 나가면 빠진 구간을
+  다시는 받지 않습니다.
+- **upsert는 INSERT를 시도하고 UNIQUE 위반이면 UPDATE로 바꿉니다.**
+  `INSERT ... ON CONFLICT`는 방언마다 import 경로가 갈리고 `INSERT OR REPLACE`는
+  SQLite 전용이라 금지입니다. "실패하면 갱신"은 양쪽에서 같은 코드로 돕니다.
 - **datetime 컬럼은 `UtcDateTime`을 씁니다.** SQLite는 시간대를 저장하지 못해 naive로
   돌려줍니다. 맨 `DateTime`을 쓰면 DB 종류에 따라 스키마 검증이 깨집니다.
 - **enum 컬럼은 `Enum(..., native_enum=False, create_constraint=True, values_callable=...)`**

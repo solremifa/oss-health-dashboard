@@ -14,6 +14,15 @@ from __future__ import annotations
 from app.models.base import NAMING_CONVENTION, Base
 from app.models.db import create_db_engine, create_session_factory
 from app.models.enums import IssueState, sa_enum
+from app.models.errors import ConflictingRecordError, RepositoryError
+from app.models.records import IssueRecord, SyncCursor
+from app.models.repository import (
+    UpsertOutcome,
+    is_unique_violation,
+    load_sync_cursor,
+    save_sync_cursor,
+    upsert_issue,
+)
 from app.models.tables import (
     Issue,
     IssueComment,
@@ -26,14 +35,23 @@ from app.models.types import UtcDateTime
 __all__ = [
     "NAMING_CONVENTION",
     "Base",
+    "ConflictingRecordError",
     "Issue",
     "IssueComment",
     "IssueFirstResponse",
     "IssueLabel",
+    "IssueRecord",
     "IssueState",
+    "RepositoryError",
+    "SyncCursor",
     "SyncState",
+    "UpsertOutcome",
     "UtcDateTime",
     "create_db_engine",
     "create_session_factory",
+    "is_unique_violation",
+    "load_sync_cursor",
     "sa_enum",
+    "save_sync_cursor",
+    "upsert_issue",
 ]
