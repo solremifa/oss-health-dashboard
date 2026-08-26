@@ -116,7 +116,9 @@ author_association    NONE 29 / CONTRIBUTOR 13 / MEMBER 2 / COLLABORATOR 1
 type                  전부 null  ← 새 "issue type" 기능 미사용 저장소
 ```
 
-라벨 상위 분포 — LLM 분류 결과를 대조할 정답지로 쓸 수 있습니다(현재 스코프 밖, 기록만):
+라벨 상위 분포 — LLM 분류 결과를 대조할 정답지로 씁니다. 2026-08-26에 **수집·저장까지는
+하기로** 결정해 `issue_labels` 테이블에 이름만 담습니다. 대조 분석 기능은 여전히 스코프
+밖입니다:
 
 ```
 enhancement 24, server 20, bug 15, auth 13, client 5, http 5,

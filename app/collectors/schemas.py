@@ -86,8 +86,9 @@ class IssueSchema(BaseModel):
     지표 4개와 메인테이너 판별(#8)에 필요한 필드만 남긴다. API는 30개 남짓한 키를
     보내지만 쓰지 않는 것을 들고 다니면 DB 스키마와 마이그레이션까지 따라 커진다.
 
-    `labels`는 담지 않는다. LLM 분류 결과를 대조할 정답지로 쓸 수 있다는 기록이
-    `docs/findings.md`에 있지만 현재 스코프 밖이다.
+    `labels`는 **이름만** 담는다. LLM 분류 결과를 대조할 정답지로 쓸 계획이라
+    수집·저장은 하되(`docs/findings.md` 3절), 대조 분석 자체는 현재 스코프 밖이다.
+    색상·설명 같은 나머지 필드는 그 용도에 쓰이지 않으므로 버린다.
 
     Attributes:
         id: 전역 이슈 ID.
@@ -102,6 +103,7 @@ class IssueSchema(BaseModel):
         comments: 코멘트 수.
         user: 작성자. self-reply 판별에 쓴다.
         author_association: 작성자와 저장소의 관계.
+        labels: 라벨 이름. 순서를 유지하고 중복을 제거한다.
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True)
@@ -118,6 +120,57 @@ class IssueSchema(BaseModel):
     comments: int
     user: GitHubUser
     author_association: str
+    # 모델이 frozen이라 list가 아니라 tuple로 받는다.
+    labels: tuple[str, ...] = ()
+
+    @field_validator("labels", mode="before")
+    @classmethod
+    def _extract_label_names(cls, value: object) -> object:
+        """라벨 객체 배열에서 이름만 뽑는다.
+
+        GitHub은 보통 `[{"id": .., "name": "bug", ...}]` 형태로 주지만 일부
+        엔드포인트·옵션에서는 문자열 배열로 준다. 둘 다 받는다.
+
+        이름을 읽을 수 없는 항목은 **건너뛰지 않고 예외를 올린다.** 조용히 빼면
+        정답지에 구멍이 뚫린 채로 나중에 LLM 분류 정확도를 재게 되고, 그 구멍은
+        분류가 틀린 것과 구분되지 않는다. 예외로 올리면 해당 이슈가
+        `IssueBatch.invalid`에 사유와 함께 남는다.
+
+        Args:
+            value: 원본 `labels` 값.
+
+        Returns:
+            중복을 제거하고 순서를 유지한 이름 tuple.
+
+        Raises:
+            ValueError: 이름을 읽을 수 없거나 빈 문자열인 항목이 있는 경우.
+        """
+        if value is None:
+            return ()
+        if not isinstance(value, list):
+            # 배열이 아니면 Pydantic이 타입 오류로 보고하게 둔다.
+            return value
+
+        names: list[str] = []
+        for entry in value:
+            if isinstance(entry, str):
+                name = entry
+            elif isinstance(entry, Mapping):
+                raw = entry.get("name")
+                if not isinstance(raw, str):
+                    raise ValueError(f"라벨에서 이름을 읽을 수 없습니다: {entry!r}")
+                name = raw
+            else:
+                raise ValueError(f"라벨 항목의 형식을 알 수 없습니다: {entry!r}")
+
+            if not name:
+                raise ValueError("빈 문자열 라벨은 받지 않습니다")
+            if name not in names:
+                # GitHub 라벨 이름은 저장소 안에서 유일하지만, 중복이 오더라도
+                # 여기서 접는다. DB의 PK 위반으로 터뜨릴 이유가 없다.
+                names.append(name)
+
+        return tuple(names)
 
     @field_validator("body", "title", mode="before")
     @classmethod

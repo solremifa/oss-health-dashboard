@@ -36,6 +36,11 @@ GitHub API → collectors → models(DB) → analysis → api → frontend
 **종합 헬스 스코어 같은 가중치 알고리즘을 만들지 마세요.** 4개 숫자를 그대로
 보여줍니다. 이 범위를 벗어나는 지표가 필요하다고 판단되면 구현 전에 먼저 물어보세요.
 
+**이슈 라벨은 저장하되 지표로 쓰지 않습니다.** 나중에 LLM 분류 결과와 대조할 정답지로
+쓰기 위해 `issue_labels` 테이블에 수집·저장합니다(2026-08-26 결정). 다만 **대조 분석
+기능은 만들지 않습니다.** 정확도 계산, 라벨 기반 지표, 대시보드 노출 전부 스코프 밖입니다.
+필요해지면 그때 이슈를 새로 만듭니다.
+
 두 가지를 명시적으로 하지 않습니다:
 
 - **"메인테이너 응답 없음"을 0으로 채우지 않습니다.** 중앙값에서 제외하되 건수를
@@ -172,6 +177,17 @@ api ──→ analysis ──┘
   박혀 있어 enum만 고치면 저장 시점에 터집니다.
 - **스키마를 바꾸면 마이그레이션을 함께 만듭니다.** ORM만 고치면 `create_all()`로 만든
   테스트 DB에서는 통과하고 배포 DB에서만 깨집니다.
+- **라벨은 `issue_labels` 정규화 테이블에 넣습니다.** JSON 배열 컬럼으로 두면 "특정
+  라벨이 붙은 이슈"를 세는 쿼리가 SQLite(`json_each`)와 PostgreSQL(`jsonb`)에서 서로
+  달라져 이관 시점에 다시 써야 합니다. 행으로 풀면 같은 SQL이 양쪽에서 돕니다.
+- **`sqlite3` 연결 설정은 `app/models/db.py`의 전역 리스너 한 곳에만 둡니다.**
+  `PRAGMA foreign_keys=ON`과, SAVEPOINT를 쓰기 위해 pysqlite의 암묵적 트랜잭션을 끄고
+  `BEGIN`을 직접 내는 처리가 **짝으로** 들어 있습니다. 한쪽만 떼면 자동 커밋 상태가
+  되어 롤백이 조용히 무력화됩니다. 엔진은 반드시 `create_db_engine()`으로 만드세요.
+- **마이그레이션 스크립트는 `app/` 코드를 import하지 않습니다.** `migrations/env.py`의
+  `_render_item`이 `UtcDateTime`을 `sa.DateTime(timezone=True)`로 바꿔 적습니다. 커스텀
+  타입을 그대로 적으면 나중에 그 클래스를 옮기는 순간 과거 마이그레이션이 전부
+  ImportError로 죽습니다.
 - **`issue_first_responses`를 `issues`의 컬럼으로 합치지 마세요.** 합치면 "아직 조사
   안 함"과 "조사했는데 메인테이너 응답이 없음"이 둘 다 NULL이 되어 구분할 수 없습니다.
   행의 존재 = 조사 완료, `responded_at IS NULL` = 응답 없음입니다.
@@ -294,14 +310,40 @@ v1 API는 사용하지 않습니다.
 .\.venv\Scripts\python.exe -m pytest tests/test_config.py -k encoding
 ```
 
+### 마이그레이션 (Alembic)
+
+```powershell
+# 현재 리비전 확인
+.\.venv\Scripts\python.exe -m alembic current
+
+# 최신 스키마 적용
+.\.venv\Scripts\python.exe -m alembic upgrade head
+
+# 모델을 고친 뒤 마이그레이션 생성 → 반드시 생성된 파일을 눈으로 확인한다
+.\.venv\Scripts\python.exe -m alembic revision --autogenerate -m "설명"
+
+# 되돌리기
+.\.venv\Scripts\python.exe -m alembic downgrade -1
+
+# 다른 DB를 대상으로 (예: 임시 파일에 시험 적용)
+.\.venv\Scripts\python.exe -m alembic -x db_url="sqlite:///./tmp.db" upgrade head
+```
+
+대상 DB는 `DATABASE_URL`(`.env` 또는 환경변수)이 정합니다. `-x db_url=...`이 있으면
+그쪽이 우선합니다. `alembic.ini`에는 URL을 적지 않습니다 — 코드와 마이그레이션이
+서로 다른 DB를 보게 됩니다.
+
+**생성된 마이그레이션에는 `ruff format`이 자동으로 걸리지 않습니다.** 만든 뒤
+`ruff check --fix .`와 `ruff format .`을 돌리고 커밋하세요.
+
 editable로 설치하므로 `PYTHONPATH` 설정 없이 `app` 패키지가 import됩니다.
 
 **의존성은 `pyproject.toml`이 단일 소스입니다.** `pip install`만 하지 말고
 `[project] dependencies`(런타임) 또는 `[project.optional-dependencies] dev`(개발 전용)에
 반드시 추가하세요.
 
-**아직 없는 것:** Alembic 설정(`alembic.ini`, `migrations/`), 개발 서버 실행 명령,
-배포. 도입하면 이 절을 갱신하세요. **검증하지 않은 명령을 여기에 적지 마세요.**
+**아직 없는 것:** 개발 서버 실행 명령, 배포. 도입하면 이 절을 갱신하세요.
+**검증하지 않은 명령을 여기에 적지 마세요.**
 
 ## 13. Claude 작업 규칙
 

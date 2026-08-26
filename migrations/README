@@ -1,0 +1,4 @@
+Alembic 마이그레이션.
+
+실행 명령과 대상 DB 결정 규칙은 CLAUDE.md 12절, 설계 배경은 env.py의 docstring에
+있습니다. alembic.ini는 시스템 로캘로 읽히므로 ASCII만 넣습니다.
