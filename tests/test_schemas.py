@@ -363,3 +363,75 @@ def test_schemas_are_frozen():
     assert IssueSchema.model_config["frozen"] is True
     assert CommentSchema.model_config["frozen"] is True
     assert issue.model_config["frozen"] is True
+
+
+# ---------------------------------------------------------------------------
+# labels — LLM 분류 결과를 대조할 정답지 (수집·저장까지만)
+# ---------------------------------------------------------------------------
+
+
+def test_label_objects_become_names():
+    """API는 라벨을 객체 배열로 준다. 정답지에 필요한 것은 이름뿐이다."""
+    item = _issue(
+        labels=[
+            {"id": 1, "name": "bug", "color": "d73a4a", "description": "Something is broken"},
+            {"id": 2, "name": "server", "color": "0e8a16"},
+        ]
+    )
+
+    issue = parse_issues([item]).issues[0]
+
+    assert issue.labels == ("bug", "server")
+
+
+def test_label_strings_are_accepted_too():
+    """일부 응답 형태는 문자열 배열로 온다. 둘 다 받는다."""
+    issue = parse_issues([_issue(labels=["bug", "enhancement"])]).issues[0]
+
+    assert issue.labels == ("bug", "enhancement")
+
+
+def test_labels_default_to_empty():
+    """실측 45건 중 1건은 라벨이 비어 있었다. 정상이다."""
+    item = _issue()
+    item.pop("labels", None)
+
+    assert parse_issues([item]).issues[0].labels == ()
+    assert parse_issues([_issue(labels=[])]).issues[0].labels == ()
+    assert parse_issues([_issue(labels=None)]).issues[0].labels == ()
+
+
+def test_duplicate_labels_are_folded_keeping_order():
+    """중복은 여기서 접는다. DB의 PK 위반으로 터뜨릴 이유가 없다."""
+    issue = parse_issues([_issue(labels=["bug", "server", "bug"])]).issues[0]
+
+    assert issue.labels == ("bug", "server")
+
+
+def test_label_without_a_name_is_reported_not_skipped():
+    """이름을 못 읽는 라벨을 조용히 빼면 정답지에 구멍이 뚫린다.
+
+    그 구멍은 나중에 "LLM이 틀린 것"과 구분되지 않는다. 해당 이슈를 `invalid`에
+    담아 드러낸다.
+    """
+    batch = parse_issues([_issue(number=7, labels=[{"id": 1, "color": "d73a4a"}])])
+
+    assert batch.issues == []
+    assert len(batch.invalid) == 1
+    assert batch.invalid[0].identifier == "#7"
+    assert "labels" in batch.invalid[0].reason
+
+
+def test_empty_label_name_is_reported():
+    """빈 문자열 라벨은 GitHub에 존재할 수 없다. DB CHECK 전에 여기서 잡는다."""
+    batch = parse_issues([_issue(number=8, labels=[{"id": 1, "name": ""}])])
+
+    assert batch.issues == []
+    assert len(batch.invalid) == 1
+
+
+def test_labels_are_immutable():
+    """모델이 frozen이라 라벨도 tuple로 들고 있어야 한다."""
+    issue = parse_issues([_issue(labels=["bug"])]).issues[0]
+
+    assert isinstance(issue.labels, tuple)
