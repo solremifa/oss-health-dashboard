@@ -1,0 +1,224 @@
+"""저장·조회 함수. **커밋하지 않는다.**
+
+트랜잭션 경계는 호출자가 정한다(`CLAUDE.md` 7절). 여기서 커밋해버리면 "이슈 489건을
+받아서 전부 저장한 뒤 커서를 전진시킨다"는 한 덩어리를 쪼갤 수 없다 -- 중간에
+실패했을 때 일부만 저장된 채로 커서가 앞서 나가고, 다음 회차가 빠진 구간을 다시
+받지 않는다.
+
+## upsert를 하는 방법
+
+**저장 전에 SELECT로 있는지 확인하지 않는다.** 확인과 삽입 사이에 다른 트랜잭션이
+끼어들면 둘 다 "없다"고 보고 둘 다 INSERT한다. 제약이 최종 판정자다.
+
+INSERT를 시도하고, UNIQUE 위반이면 UPDATE로 바꾼다. `INSERT ... ON CONFLICT`를 쓰지
+않는 이유는 그 구문이 방언마다 다르기 때문이다 -- SQLite와 PostgreSQL에서 import
+경로가 갈리고, SQLite 전용 `INSERT OR REPLACE`는 금지되어 있다(`CLAUDE.md` 3절).
+"실패하면 갱신"은 양쪽에서 같은 코드로 돈다.
+
+**INSERT는 반드시 `session.begin_nested()`(SAVEPOINT) 안에서 한다.** 그냥 잡으면
+실패한 문장이 트랜잭션 전체를 무효화해서 이후 저장이 전부 실패한다. SQLite에서
+SAVEPOINT가 제대로 동작하려면 드라이버 설정이 필요한데, 그건 `app.models.db`가
+연결 시점에 처리한다.
+
+**UNIQUE 위반만 처리한다.** FK·NOT NULL·CHECK 위반은 그대로 올린다. 뭉뚱그려 잡으면
+"참조하는 이슈가 없다"거나 "본문이 NULL이다" 같은 진짜 버그가 갱신 시도로 둔갑해
+조용히 사라진다.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from enum import Enum
+from typing import Any
+
+from sqlalchemy import delete, insert, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.logging import get_logger
+from app.models.base import Base
+from app.models.errors import ConflictingRecordError
+from app.models.records import IssueRecord, SyncCursor
+from app.models.tables import Issue, IssueLabel, SyncState
+
+logger = get_logger(__name__)
+
+# PostgreSQL의 unique_violation. psycopg가 `sqlstate`로 노출한다.
+_UNIQUE_VIOLATION_SQLSTATE = "23505"
+
+# SQLite는 SQLSTATE가 없어 메시지를 본다. PK 위반도 같은 문구로 온다.
+_SQLITE_UNIQUE_MARKERS = ("UNIQUE constraint failed",)
+
+
+class UpsertOutcome(Enum):
+    """upsert가 실제로 한 일."""
+
+    INSERTED = "inserted"
+    UPDATED = "updated"
+
+
+def is_unique_violation(error: IntegrityError) -> bool:
+    """UNIQUE(또는 PK) 위반인지 판별한다.
+
+    DB마다 신호가 다르다. PostgreSQL은 SQLSTATE `23505`를 주고, SQLite는 코드가
+    없어 메시지를 봐야 한다. 메시지를 보는 쪽을 나중에 잊지 않도록 한 곳에 모은다.
+
+    Args:
+        error: SQLAlchemy가 감싼 무결성 오류.
+
+    Returns:
+        UNIQUE 제약 위반이면 `True`. NOT NULL·FK·CHECK 위반이면 `False`.
+    """
+    original = error.orig
+    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    if sqlstate is not None:
+        return str(sqlstate) == _UNIQUE_VIOLATION_SQLSTATE
+
+    message = str(original)
+    return any(marker in message for marker in _SQLITE_UNIQUE_MARKERS)
+
+
+def _insert_or_update(
+    session: Session,
+    model: type[Base],
+    *,
+    key: dict[str, Any],
+    values: dict[str, Any],
+) -> UpsertOutcome:
+    """INSERT를 시도하고 UNIQUE 위반이면 UPDATE로 바꾼다.
+
+    Args:
+        session: 사용할 세션. 커밋하지 않는다.
+        model: 대상 ORM 모델.
+        key: 갱신 대상을 특정하는 컬럼 값(보통 PK).
+        values: 삽입할 전체 컬럼 값. `key`를 포함한다.
+
+    Returns:
+        실제로 삽입했는지 갱신했는지.
+
+    Raises:
+        IntegrityError: UNIQUE 이외의 제약을 위반한 경우. 그대로 올린다.
+        ConflictingRecordError: UNIQUE 위반인데 `key`로 갱신할 행이 없는 경우.
+    """
+    try:
+        with session.begin_nested():
+            session.execute(insert(model).values(**values))
+    except IntegrityError as error:
+        if not is_unique_violation(error):
+            raise
+
+        changes = {column: value for column, value in values.items() if column not in key}
+        statement = update(model)
+        for column, value in key.items():
+            statement = statement.where(getattr(model, column) == value)
+
+        result = session.execute(statement.values(**changes))
+        if result.rowcount == 0:
+            raise ConflictingRecordError(model.__tablename__, key) from error
+        return UpsertOutcome.UPDATED
+
+    return UpsertOutcome.INSERTED
+
+
+def upsert_issue(session: Session, record: IssueRecord) -> UpsertOutcome:
+    """이슈 한 건을 저장하거나 갱신한다. 라벨도 함께 맞춘다.
+
+    같은 이슈를 두 번 수집해도 행은 하나다. `since`가 포함(inclusive) 경계라
+    경계에 걸친 이슈는 매 회차 다시 오는데, 그게 정상 동작이 되려면 이 함수가
+    멱등이어야 한다.
+
+    Args:
+        session: 사용할 세션. **커밋하지 않는다.**
+        record: 저장할 이슈.
+
+    Returns:
+        실제로 삽입했는지 갱신했는지.
+
+    Raises:
+        IntegrityError: UNIQUE 이외의 제약을 위반한 경우.
+        ConflictingRecordError: 같은 `(repo_full_name, number)`에 다른 `id`가 온 경우.
+    """
+    outcome = _insert_or_update(
+        session,
+        Issue,
+        key={"id": record.id},
+        values=record.column_values(),
+    )
+    _replace_labels(session, record.id, record.labels)
+    return outcome
+
+
+def _replace_labels(session: Session, issue_id: int, labels: Sequence[str]) -> None:
+    """이슈의 라벨을 통째로 갈아끼운다.
+
+    차이를 계산해서 붙은 것만 넣고 떨어진 것만 지우는 방법도 있지만, 이슈 하나에
+    라벨은 많아야 몇 개다. **지우고 다시 넣는 쪽이 "라벨이 제거된 경우"를 따로
+    처리하지 않아도 되어 틀릴 여지가 적다.** 같은 트랜잭션 안이라 중간 상태가
+    밖에서 보이지도 않는다.
+
+    Args:
+        session: 사용할 세션.
+        issue_id: 대상 이슈.
+        labels: 새 라벨 이름. 순서는 유지하지만 의미는 없다.
+    """
+    session.execute(delete(IssueLabel).where(IssueLabel.issue_id == issue_id))
+    if labels:
+        session.execute(
+            insert(IssueLabel),
+            [{"issue_id": issue_id, "name": name} for name in labels],
+        )
+
+
+def load_sync_cursor(session: Session, repo_full_name: str, resource: str) -> SyncCursor | None:
+    """저장된 증분 수집 커서를 읽는다.
+
+    Args:
+        session: 사용할 세션.
+        repo_full_name: 대상 저장소.
+        resource: 수집 대상 종류(`"issues"` 등).
+
+    Returns:
+        저장된 커서. 한 번도 수집한 적이 없으면 `None`.
+    """
+    state = session.get(SyncState, (repo_full_name, resource))
+    if state is None:
+        return None
+    return SyncCursor(
+        etag=state.etag,
+        request_fingerprint=state.request_fingerprint,
+        since_cursor=state.since_cursor,
+        last_synced_at=state.last_synced_at,
+    )
+
+
+def save_sync_cursor(
+    session: Session, repo_full_name: str, resource: str, cursor: SyncCursor
+) -> UpsertOutcome:
+    """증분 수집 커서를 저장한다. **커밋하지 않는다.**
+
+    커밋을 호출자에게 맡기는 것이 여기서 특히 중요하다. 이슈 저장과 커서 전진이
+    **같은 트랜잭션**이어야 "저장은 됐는데 커서는 안 갔다"거나 그 반대가 생기지
+    않는다. 뒤쪽이 더 나쁘다 -- 커서만 앞서 나가면 빠진 구간을 다시는 받지 않는다.
+
+    Args:
+        session: 사용할 세션.
+        repo_full_name: 대상 저장소.
+        resource: 수집 대상 종류.
+        cursor: 저장할 커서.
+
+    Returns:
+        실제로 삽입했는지 갱신했는지.
+    """
+    return _insert_or_update(
+        session,
+        SyncState,
+        key={"repo_full_name": repo_full_name, "resource": resource},
+        values={
+            "repo_full_name": repo_full_name,
+            "resource": resource,
+            "etag": cursor.etag,
+            "request_fingerprint": cursor.request_fingerprint,
+            "since_cursor": cursor.since_cursor,
+            "last_synced_at": cursor.last_synced_at,
+        },
+    )

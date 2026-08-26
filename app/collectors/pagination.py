@@ -129,6 +129,29 @@ def iter_pages(
     logger.debug("%d페이지를 받았습니다: %s", page, url)
 
 
+def page_items(response: httpx2.Response, url: str) -> list[Any]:
+    """페이지 응답 본문이 배열인지 확인하고 아이템을 꺼낸다.
+
+    목록 엔드포인트가 배열이 아닌 것을 돌려주는 것은 정상 상황이 아니다(오류 객체,
+    프록시가 끼워 넣은 HTML 등). 여기서 걸러내지 않으면 `IssueBatch.invalid`에
+    "객체가 아닙니다" 몇 건으로 뭉개져 원인이 흐려진다.
+
+    Args:
+        response: 200으로 받은 페이지 응답.
+        url: 오류 메시지에 넣을 요청 URL.
+
+    Returns:
+        응답 배열의 아이템.
+
+    Raises:
+        CollectorError: 응답 본문이 배열이 아닌 경우.
+    """
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise CollectorError(f"목록 응답이 배열이 아닙니다: {type(payload).__name__} (url={url})")
+    return payload
+
+
 def iter_items(
     client: GitHubClient,
     url: str,
@@ -160,9 +183,4 @@ def iter_items(
             logger.debug("304 Not Modified — 내놓을 아이템이 없습니다: %s", url)
             continue
 
-        payload = response.json()
-        if not isinstance(payload, list):
-            raise CollectorError(
-                f"목록 응답이 배열이 아닙니다: {type(payload).__name__} (url={url})"
-            )
-        yield from payload
+        yield from page_items(response, url)

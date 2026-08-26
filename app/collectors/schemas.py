@@ -30,6 +30,7 @@ from typing import Annotated, Any, Final, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, ValidationError, field_validator
 
 from app.logging import get_logger
+from app.models import IssueRecord, IssueState
 
 logger = get_logger(__name__)
 
@@ -188,6 +189,44 @@ class IssueSchema(BaseModel):
             `None`이면 빈 문자열, 아니면 원본 그대로.
         """
         return "" if value is None else value
+
+    def to_record(self, repo_full_name: str) -> IssueRecord:
+        """저장 계층이 받는 값 객체로 바꾼다.
+
+        이 변환이 **수집 쪽에** 있는 이유는 의존 방향 때문이다. `models`는 어떤
+        레이어도 import하지 않으므로 `IssueSchema`를 알 수 없고, 반대로 수집 쪽은
+        `models`의 스키마를 참조해도 된다(`CLAUDE.md` 5절).
+
+        저장소 이름은 인자로 받는다. API 응답에도 `repository_url`이 들어 있지만
+        "어느 저장소를 긁고 있는가"는 요청을 보낸 쪽이 이미 아는 값이라, 응답을
+        파싱해서 되짚을 이유가 없다.
+
+        Args:
+            repo_full_name: `"owner/name"` 형식의 대상 저장소.
+
+        Returns:
+            저장 계층에 넘길 값 객체.
+        """
+        return IssueRecord(
+            id=self.id,
+            repo_full_name=repo_full_name,
+            number=self.number,
+            title=self.title,
+            body=self.body,
+            state=IssueState(self.state),
+            state_reason=self.state_reason,
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+            closed_at=self.closed_at,
+            # API의 `comments`는 개수다. DB에서는 코멘트 테이블과 헷갈리지 않도록
+            # `comments_count`로 이름을 바꾼다.
+            comments_count=self.comments,
+            author_login=self.user.login,
+            author_id=self.user.id,
+            author_type=self.user.type,
+            author_association=self.author_association,
+            labels=self.labels,
+        )
 
 
 class CommentSchema(BaseModel):
