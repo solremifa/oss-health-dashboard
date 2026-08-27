@@ -199,6 +199,9 @@ api ──→ analysis ──┘
   `_render_item`이 `UtcDateTime`을 `sa.DateTime(timezone=True)`로 바꿔 적습니다. 커스텀
   타입을 그대로 적으면 나중에 그 클래스를 옮기는 순간 과거 마이그레이션이 전부
   ImportError로 죽습니다.
+- **분석 결과도 별도 테이블(`issue_analyses`)이고 실패하면 행을 만들지 않습니다.**
+  실패를 `other`로 채우면 분포가 조용히 왜곡되고 왜곡됐다는 사실이 남지 않습니다.
+  행이 없다 = 미분석이고, 그 건수는 지표 응답에 드러납니다.
 - **`issue_first_responses`를 `issues`의 컬럼으로 합치지 마세요.** 합치면 "아직 조사
   안 함"과 "조사했는데 메인테이너 응답이 없음"이 둘 다 NULL이 되어 구분할 수 없습니다.
   행의 존재 = 조사 완료, `responded_at IS NULL` = 응답 없음입니다.
@@ -208,8 +211,11 @@ api ──→ analysis ──┘
 - **모델은 `claude-opus-5`.** 모델 ID에 날짜 접미사를 붙이지 않습니다.
 - **구조화 출력(`output_config.format`)을 씁니다.** 프롬프트로만 "JSON만 내놔"라고
   하는 것보다 API가 스키마를 강제하는 쪽이 확실합니다.
-- **분류 값은 자유 문자열이 아니라 enum으로 받습니다.** 허용 목록은 **한 곳에서
-  파생**시켜 프롬프트·API 스키마·Pydantic·DB CHECK 네 곳이 어긋나지 않게 합니다.
+- **분류 값은 자유 문자열이 아니라 enum으로 받습니다.** 허용 목록의 단일 출처는
+  `app/models/enums.py`의 `IssueCategory`·`IssueSentiment`이고, 프롬프트 선택지·API
+  스키마·Pydantic 검증·DB CHECK 네 곳이 전부 거기서 파생됩니다. 값에 붙는 설명도
+  `app/analysis/classify.py`에서 enum 전체를 덮는지 import 시점에 확인합니다 —
+  멤버를 늘리고 설명을 빠뜨리면 스키마에는 있는데 프롬프트에는 없는 선택지가 됩니다.
 - **`stop_reason`을 먼저 확인하고 `content`를 읽습니다.** `refusal`이면 `content`가
   비어 있고, `max_tokens`면 잘린 본문이 옵니다.
 - **파싱·검증 실패는 재시도하고, API 오류는 재시도하지 않습니다.** 레이트리밋과 5xx는

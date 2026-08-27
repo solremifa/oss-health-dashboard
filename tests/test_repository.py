@@ -20,23 +20,29 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import (
+    AnalysisRecord,
     Base,
     CommentRecord,
     ConflictingRecordError,
     FirstResponseRecord,
     Issue,
+    IssueAnalysis,
+    IssueCategory,
     IssueComment,
     IssueFirstResponse,
     IssueLabel,
     IssueRecord,
+    IssueSentiment,
     IssueState,
     SyncCursor,
     UpsertOutcome,
     create_db_engine,
     create_session_factory,
+    load_analysis,
     load_first_response,
     load_sync_cursor,
     save_sync_cursor,
+    upsert_analysis,
     upsert_comment,
     upsert_first_response,
     upsert_issue,
@@ -427,6 +433,89 @@ def test_the_db_check_also_rejects_a_partial_verdict(session: Session):
                 comment_id=None,
                 responder_login=None,
                 checked_at=UPDATED_AT,
+            )
+        )
+        session.flush()
+
+
+# ---------------------------------------------------------------------------
+# issue_analyses — 무엇으로 분석했는지가 함께 남는다 (#9)
+# ---------------------------------------------------------------------------
+
+
+def _analysis(**overrides: Any) -> AnalysisRecord:
+    """기본값이 채워진 분류 결과."""
+    values: dict[str, Any] = {
+        "issue_id": 3_288_000_001,
+        "category": IssueCategory.BUG,
+        "sentiment": IssueSentiment.NEUTRAL,
+        "model": "claude-opus-5",
+        "prompt_version": "1",
+        "analyzed_at": UPDATED_AT,
+    }
+    values.update(overrides)
+    return AnalysisRecord(**values)
+
+
+def test_analysis_round_trips(session: Session):
+    upsert_issue(session, _record())
+
+    outcome = upsert_analysis(session, _analysis())
+    session.flush()
+
+    assert outcome is UpsertOutcome.INSERTED
+    assert load_analysis(session, 3_288_000_001) == _analysis()
+
+
+def test_analysis_for_an_unknown_issue_is_rejected(session: Session):
+    """FK 위반은 그대로 올라와야 한다. 분석 결과만 떠 있는 행은 만들지 않는다."""
+    with pytest.raises(IntegrityError):
+        upsert_analysis(session, _analysis(issue_id=999_999))
+        session.flush()
+
+
+def test_provenance_cannot_be_blank(session: Session):
+    """model과 prompt_version이 비면 나중에 섞인 데이터를 구분할 수 없다."""
+    with pytest.raises(ValueError, match="model은 비어 있을 수 없습니다"):
+        _analysis(model="")
+
+    with pytest.raises(ValueError, match="prompt_version은 비어 있을 수 없습니다"):
+        _analysis(prompt_version="")
+
+
+def test_the_db_also_rejects_blank_provenance(session: Session):
+    """값 객체를 우회해도 CHECK가 막는다. 무결성의 최종 판정자는 제약이다."""
+    upsert_issue(session, _record())
+    session.flush()
+
+    with pytest.raises(IntegrityError):
+        session.execute(
+            insert(IssueAnalysis).values(
+                issue_id=3_288_000_001,
+                category=IssueCategory.BUG,
+                sentiment=IssueSentiment.NEUTRAL,
+                model="",
+                prompt_version="1",
+                analyzed_at=UPDATED_AT,
+            )
+        )
+        session.flush()
+
+
+def test_an_unknown_category_is_rejected_by_the_check_constraint(session: Session):
+    """enum · 프롬프트 · 스키마가 어긋나 낯선 값이 흘러들어도 DB에서 멈춘다."""
+    upsert_issue(session, _record())
+    session.flush()
+
+    with pytest.raises(IntegrityError):
+        session.execute(
+            insert(IssueAnalysis).values(
+                issue_id=3_288_000_001,
+                category="documentation",
+                sentiment="neutral",
+                model="claude-opus-5",
+                prompt_version="1",
+                analyzed_at=UPDATED_AT,
             )
         )
         session.flush()

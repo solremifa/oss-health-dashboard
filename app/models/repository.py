@@ -38,9 +38,16 @@ from sqlalchemy.orm import Session
 from app.logging import get_logger
 from app.models.base import Base
 from app.models.errors import ConflictingRecordError
-from app.models.records import CommentRecord, FirstResponseRecord, IssueRecord, SyncCursor
+from app.models.records import (
+    AnalysisRecord,
+    CommentRecord,
+    FirstResponseRecord,
+    IssueRecord,
+    SyncCursor,
+)
 from app.models.tables import (
     Issue,
+    IssueAnalysis,
     IssueComment,
     IssueFirstResponse,
     IssueLabel,
@@ -244,6 +251,54 @@ def load_first_response(session: Session, issue_id: int) -> FirstResponseRecord 
         responded_at=row.responded_at,
         comment_id=row.comment_id,
         responder_login=row.responder_login,
+    )
+
+
+def upsert_analysis(session: Session, record: AnalysisRecord) -> UpsertOutcome:
+    """LLM 분류 결과를 저장하거나 갱신한다.
+
+    **실패한 분석은 여기에 오지 않는다.** 분석에 실패한 이슈는 행이 생기지 않고
+    미분석으로 남으며, 그 건수는 지표 응답에 드러난다. 실패를 "기타"로 저장해
+    성공한 것처럼 만들지 않는다.
+
+    Args:
+        session: 사용할 세션. **커밋하지 않는다.**
+        record: 저장할 분류 결과.
+
+    Returns:
+        실제로 삽입했는지 갱신했는지.
+
+    Raises:
+        IntegrityError: 참조하는 이슈가 없는 등 UNIQUE 이외의 제약을 위반한 경우.
+    """
+    return _insert_or_update(
+        session,
+        IssueAnalysis,
+        key={"issue_id": record.issue_id},
+        values=record.column_values(),
+    )
+
+
+def load_analysis(session: Session, issue_id: int) -> AnalysisRecord | None:
+    """저장된 분류 결과를 읽는다.
+
+    Args:
+        session: 사용할 세션.
+        issue_id: 대상 이슈.
+
+    Returns:
+        분류 결과. 아직 분석하지 않았거나 분석에 실패했으면 `None`.
+    """
+    row = session.get(IssueAnalysis, issue_id)
+    if row is None:
+        return None
+    return AnalysisRecord(
+        issue_id=row.issue_id,
+        category=row.category,
+        sentiment=row.sentiment,
+        model=row.model,
+        prompt_version=row.prompt_version,
+        analyzed_at=row.analyzed_at,
     )
 
 
