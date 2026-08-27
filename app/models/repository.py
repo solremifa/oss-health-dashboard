@@ -38,8 +38,14 @@ from sqlalchemy.orm import Session
 from app.logging import get_logger
 from app.models.base import Base
 from app.models.errors import ConflictingRecordError
-from app.models.records import IssueRecord, SyncCursor
-from app.models.tables import Issue, IssueLabel, SyncState
+from app.models.records import CommentRecord, FirstResponseRecord, IssueRecord, SyncCursor
+from app.models.tables import (
+    Issue,
+    IssueComment,
+    IssueFirstResponse,
+    IssueLabel,
+    SyncState,
+)
 
 logger = get_logger(__name__)
 
@@ -167,6 +173,78 @@ def _replace_labels(session: Session, issue_id: int, labels: Sequence[str]) -> N
             insert(IssueLabel),
             [{"issue_id": issue_id, "name": name} for name in labels],
         )
+
+
+def upsert_comment(session: Session, record: CommentRecord) -> UpsertOutcome:
+    """코멘트 한 건을 저장하거나 갱신한다.
+
+    같은 이슈를 다시 수집하면 같은 코멘트가 다시 온다. 판정 근거를 남기는 것이
+    목적이라 행이 늘어나면 안 되고, 그래서 여기서도 upsert다.
+
+    Args:
+        session: 사용할 세션. **커밋하지 않는다.**
+        record: 저장할 코멘트.
+
+    Returns:
+        실제로 삽입했는지 갱신했는지.
+
+    Raises:
+        IntegrityError: 참조하는 이슈가 없는 등 UNIQUE 이외의 제약을 위반한 경우.
+    """
+    return _insert_or_update(
+        session,
+        IssueComment,
+        key={"id": record.id},
+        values=record.column_values(),
+    )
+
+
+def upsert_first_response(session: Session, record: FirstResponseRecord) -> UpsertOutcome:
+    """메인테이너 첫 응답 판정 결과를 저장하거나 갱신한다.
+
+    **행의 존재 자체가 "조사 완료"를 뜻한다.** 응답이 없었던 경우에도 저장을
+    건너뛰지 않는다. 건너뛰면 "아직 조사 안 함"과 구분되지 않아, 재조사 대상을
+    고를 때 영원히 다시 조사하게 된다.
+
+    Args:
+        session: 사용할 세션. **커밋하지 않는다.**
+        record: 저장할 판정 결과.
+
+    Returns:
+        실제로 삽입했는지 갱신했는지.
+
+    Raises:
+        IntegrityError: 참조하는 이슈가 없는 등 UNIQUE 이외의 제약을 위반한 경우.
+    """
+    return _insert_or_update(
+        session,
+        IssueFirstResponse,
+        key={"issue_id": record.issue_id},
+        values=record.column_values(),
+    )
+
+
+def load_first_response(session: Session, issue_id: int) -> FirstResponseRecord | None:
+    """저장된 첫 응답 판정 결과를 읽는다.
+
+    Args:
+        session: 사용할 세션.
+        issue_id: 대상 이슈.
+
+    Returns:
+        판정 결과. **아직 조사하지 않았으면 `None`.** 조사했지만 메인테이너
+        응답이 없었던 경우는 `None`이 아니라 `responded_at is None`인 값이다.
+    """
+    row = session.get(IssueFirstResponse, issue_id)
+    if row is None:
+        return None
+    return FirstResponseRecord(
+        issue_id=row.issue_id,
+        checked_at=row.checked_at,
+        responded_at=row.responded_at,
+        comment_id=row.comment_id,
+        responder_login=row.responder_login,
+    )
 
 
 def load_sync_cursor(session: Session, repo_full_name: str, resource: str) -> SyncCursor | None:
