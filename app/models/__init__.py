@@ -13,21 +13,30 @@ from __future__ import annotations
 
 from app.models.base import NAMING_CONVENTION, Base
 from app.models.db import create_db_engine, create_session_factory
-from app.models.enums import IssueState, sa_enum
+from app.models.enums import IssueCategory, IssueSentiment, IssueState, sa_enum
 from app.models.errors import ConflictingRecordError, RepositoryError
-from app.models.records import CommentRecord, FirstResponseRecord, IssueRecord, SyncCursor
+from app.models.records import (
+    AnalysisRecord,
+    CommentRecord,
+    FirstResponseRecord,
+    IssueRecord,
+    SyncCursor,
+)
 from app.models.repository import (
     UpsertOutcome,
     is_unique_violation,
+    load_analysis,
     load_first_response,
     load_sync_cursor,
     save_sync_cursor,
+    upsert_analysis,
     upsert_comment,
     upsert_first_response,
     upsert_issue,
 )
 from app.models.tables import (
     Issue,
+    IssueAnalysis,
     IssueComment,
     IssueFirstResponse,
     IssueLabel,
@@ -37,15 +46,19 @@ from app.models.types import UtcDateTime
 
 __all__ = [
     "NAMING_CONVENTION",
+    "AnalysisRecord",
     "Base",
     "CommentRecord",
     "ConflictingRecordError",
     "FirstResponseRecord",
     "Issue",
+    "IssueAnalysis",
+    "IssueCategory",
     "IssueComment",
     "IssueFirstResponse",
     "IssueLabel",
     "IssueRecord",
+    "IssueSentiment",
     "IssueState",
     "RepositoryError",
     "SyncCursor",
@@ -55,10 +68,12 @@ __all__ = [
     "create_db_engine",
     "create_session_factory",
     "is_unique_violation",
+    "load_analysis",
     "load_first_response",
     "load_sync_cursor",
     "sa_enum",
     "save_sync_cursor",
+    "upsert_analysis",
     "upsert_comment",
     "upsert_first_response",
     "upsert_issue",

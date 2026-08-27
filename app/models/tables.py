@@ -14,6 +14,7 @@
 | `issue_labels` | 이슈에 붙은 라벨 이름. LLM 분류 결과와 대조할 정답지 |
 | `issue_comments` | 첫 응답 판정의 근거가 되는 코멘트 |
 | `issue_first_responses` | 메인테이너 첫 응답 판정 결과 (#8) |
+| `issue_analyses` | LLM 분류 결과 (#9) |
 | `sync_state` | 증분 수집 커서와 ETag (#7) |
 
 ## PR 행을 두지 않는다
@@ -45,7 +46,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
-from app.models.enums import IssueState, sa_enum
+from app.models.enums import IssueCategory, IssueSentiment, IssueState, sa_enum
 from app.models.types import UtcDateTime
 
 # GitHub의 login·association 같은 식별자 길이. 넉넉하게 잡되 무제한으로 두지 않는다.
@@ -241,6 +242,59 @@ class IssueFirstResponse(Base):
             " AND responder_login IS NOT NULL)",
             name="response_fields_all_or_none",
         ),
+    )
+
+
+class IssueAnalysis(Base):
+    """LLM 분류 결과 (#9).
+
+    ## 무엇으로 분석했는지를 함께 남긴다
+
+    프롬프트나 모델이 바뀌면 같은 이슈에서 다른 답이 나온다. `model`과
+    `prompt_version`을 함께 저장하지 않으면 **서로 다른 조건에서 나온 결과가 한
+    테이블에 섞이고, 섞였다는 사실조차 알 수 없다**(`CLAUDE.md` 8절). 나중에
+    "이 분포는 어떤 프롬프트로 낸 것인가"에 답하려면 값이 남아 있어야 한다.
+
+    ## 행이 없으면 미분석이다
+
+    `issue_first_responses`와 같은 규칙이다. 분석에 실패한 이슈는 행이 생기지
+    않고 **미분석으로 남는다.** 지표 응답은 그 건수를 드러낸다 -- 분모에서 조용히
+    빼지 않는다(`CLAUDE.md` 2절).
+
+    Attributes:
+        issue_id: 분석 대상 이슈. 이슈당 한 행이다.
+        category: 버그 / 기능요청 / 질문 / 기타.
+        sentiment: 긍정 / 중립 / 불만.
+        model: 판정에 쓴 모델 ID.
+        prompt_version: 판정에 쓴 프롬프트 버전.
+        analyzed_at: 분석한 시각.
+    """
+
+    __tablename__ = "issue_analyses"
+
+    issue_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("issues.id", ondelete="CASCADE"),
+        primary_key=True,
+        autoincrement=False,
+    )
+
+    category: Mapped[IssueCategory] = mapped_column(
+        sa_enum(IssueCategory, name="issue_category"), nullable=False
+    )
+    sentiment: Mapped[IssueSentiment] = mapped_column(
+        sa_enum(IssueSentiment, name="issue_sentiment"), nullable=False
+    )
+
+    model: Mapped[str] = mapped_column(String(_SHORT_TOKEN_LENGTH), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(_SHORT_TOKEN_LENGTH), nullable=False)
+
+    analyzed_at: Mapped[UtcDateTime] = mapped_column(UtcDateTime, nullable=False)
+
+    __table_args__ = (
+        # 빈 문자열은 "모른다"를 저장한 것과 같다. 그럴 바엔 행을 만들지 않는다.
+        CheckConstraint("length(model) > 0", name="model_not_empty"),
+        CheckConstraint("length(prompt_version) > 0", name="prompt_version_not_empty"),
     )
 
 

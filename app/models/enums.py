@@ -35,6 +35,39 @@ class IssueState(PyEnum):
     CLOSED = "closed"
 
 
+class IssueCategory(PyEnum):
+    """LLM이 판정한 이슈 분류.
+
+    **이 목록이 허용 값의 단일 출처다.** 프롬프트에 적는 선택지, Anthropic
+    구조화 출력(`output_config.format`)의 JSON 스키마, 응답을 검증하는 Pydantic
+    모델, DB의 CHECK 제약이 전부 여기서 파생된다. 네 곳 중 하나만 손으로 고치면
+    나머지와 어긋나고, 그 어긋남은 "LLM이 이상한 값을 냈다"처럼 보인다.
+
+    `OTHER`를 둔 이유는 분류를 강제당한 모델이 억지로 셋 중 하나를 고르는 것보다
+    "해당 없음"을 말할 수 있는 편이 분포를 덜 왜곡하기 때문이다.
+    """
+
+    BUG = "bug"
+    FEATURE_REQUEST = "feature_request"
+    QUESTION = "question"
+    OTHER = "other"
+
+
+class IssueSentiment(PyEnum):
+    """LLM이 판정한 이슈의 감정 톤.
+
+    `IssueCategory`와 같은 이유로 이 목록이 단일 출처다.
+
+    부정 쪽을 `NEGATIVE`가 아니라 `FRUSTRATED`로 둔다. 이슈 트래커에서 읽어내려는
+    것은 "나쁜 감정"이 아니라 **막혀서 답답한 상태**이고, 둘을 같은 이름으로 부르면
+    버그 리포트의 건조한 서술까지 부정으로 쏠린다.
+    """
+
+    POSITIVE = "positive"
+    NEUTRAL = "neutral"
+    FRUSTRATED = "frustrated"
+
+
 def sa_enum(enum_class: type[PyEnum], *, name: str) -> SaEnum:
     """Python enum을 CHECK 제약이 붙은 VARCHAR 컬럼 타입으로 만든다.
 

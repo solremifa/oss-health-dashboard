@@ -46,8 +46,8 @@ def _alembic_config(url: str) -> Config:
     return config
 
 
-def _type_bound_check_names(metadata: MetaData) -> set[str]:
-    """`Enum(create_constraint=True)`이 만들어낸 CHECK 제약 이름을 모은다.
+def _type_bound_check_names(metadata: MetaData) -> dict[str, set[str]]:
+    """`Enum(create_constraint=True)`이 만들어낸 CHECK 제약 이름을 테이블별로 모은다.
 
     이런 제약은 컬럼 타입에 딸린 것이라(`_type_bound`) 알렘빅의 autogenerate가
     메타데이터 쪽에서는 세지 않는다. 반면 DB에서 리플렉션하면 평범한 CHECK로
@@ -55,23 +55,30 @@ def _type_bound_check_names(metadata: MetaData) -> set[str]:
     잡힌다.**
 
     이름을 여기에 적어두지 않고 메타데이터에서 뽑는다. enum 컬럼을 새로 추가한
-    사람이 이 목록을 갱신하는 것을 잊어도 자동으로 따라온다.
+    사람이 이 목록을 갱신하는 것을 잊어도 자동으로 따라온다. 테이블별로 나누는
+    이유는 아래에서 "정말 그 테이블에 만들어졌는지"를 확인하기 때문이다 --
+    한 덩어리로 합치면 A 테이블의 제약이 B 테이블에 있는 것으로 통과한다.
 
     Args:
         metadata: 검사할 메타데이터.
 
     Returns:
-        타입에 딸린 CHECK 제약의 이름 집합.
+        테이블 이름 -> 타입에 딸린 CHECK 제약 이름 집합. 그런 제약이 없는
+        테이블은 포함하지 않는다.
     """
-    return {
-        constraint.name
-        for table in metadata.tables.values()
-        for constraint in table.constraints
-        if isinstance(constraint, CheckConstraint)
-        # SQLAlchemy가 "이 CHECK는 타입이 만든 것"이라고 표시해 두는 비공개 플래그다.
-        and getattr(constraint, "_type_bound", False)
-        and constraint.name is not None
-    }
+    by_table: dict[str, set[str]] = {}
+    for table in metadata.tables.values():
+        names = {
+            constraint.name
+            for constraint in table.constraints
+            if isinstance(constraint, CheckConstraint)
+            # SQLAlchemy가 "이 CHECK는 타입이 만든 것"이라고 표시해 두는 비공개 플래그다.
+            and getattr(constraint, "_type_bound", False)
+            and constraint.name is not None
+        }
+        if names:
+            by_table[table.name] = names
+    return by_table
 
 
 def test_migrations_produce_the_orm_schema(tmp_path: Path):
@@ -80,19 +87,24 @@ def test_migrations_produce_the_orm_schema(tmp_path: Path):
     command.upgrade(_alembic_config(url), "head")
 
     type_bound_checks = _type_bound_check_names(Base.metadata)
+    assert type_bound_checks, "enum CHECK가 하나도 없다면 sa_enum 설정이 무력화된 것이다"
+    excluded_names = {name for names in type_bound_checks.values() for name in names}
+
     engine = create_db_engine(url)
     try:
         # 비교에서 빼는 제약이 정말로 DB에 만들어졌는지는 따로 확인한다.
         # 그냥 빼기만 하면 마이그레이션에서 enum CHECK가 통째로 빠져도 통과한다.
-        reflected = {
-            constraint["name"] for constraint in inspect(engine).get_check_constraints("issues")
-        }
-        assert type_bound_checks <= reflected
+        inspector = inspect(engine)
+        for table_name, expected in type_bound_checks.items():
+            reflected = {
+                constraint["name"] for constraint in inspector.get_check_constraints(table_name)
+            }
+            assert expected <= reflected, table_name
 
         def include_object(
             obj: Any, name: str | None, type_: str, reflected_: bool, compare_to: Any
         ) -> bool:
-            return not (type_ == "check_constraint" and name in type_bound_checks)
+            return not (type_ == "check_constraint" and name in excluded_names)
 
         with engine.connect() as connection:
             context = MigrationContext.configure(

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from app.models.enums import IssueState
+from app.models.enums import IssueCategory, IssueSentiment, IssueState
 
 
 @dataclass(frozen=True)
@@ -205,6 +205,60 @@ class FirstResponseRecord:
             "comment_id": self.comment_id,
             "responder_login": self.responder_login,
             "checked_at": self.checked_at,
+        }
+
+
+@dataclass(frozen=True)
+class AnalysisRecord:
+    """LLM 분류 결과 한 건.
+
+    `category`와 `sentiment`를 문자열이 아니라 enum으로 들고 다닌다. 허용 값은
+    `app.models.enums`가 단일 출처이고, 프롬프트·API 스키마·이 값 객체·DB CHECK가
+    전부 거기서 파생된다(`CLAUDE.md` 8절).
+
+    `model`과 `prompt_version`은 선택 항목이 아니다. 둘 없이 저장하면 조건이 다른
+    결과가 한 테이블에 섞이고 나중에 구분할 수 없다.
+
+    Attributes:
+        issue_id: 분석 대상 이슈.
+        category: 버그 / 기능요청 / 질문 / 기타.
+        sentiment: 긍정 / 중립 / 불만.
+        model: 판정에 쓴 모델 ID.
+        prompt_version: 판정에 쓴 프롬프트 버전.
+        analyzed_at: 분석한 시각.
+    """
+
+    issue_id: int
+    category: IssueCategory
+    sentiment: IssueSentiment
+    model: str
+    prompt_version: str
+    analyzed_at: datetime
+
+    def __post_init__(self) -> None:
+        """출처 정보가 비어 있지 않은지 확인한다.
+
+        Raises:
+            ValueError: `model`이나 `prompt_version`이 빈 문자열인 경우.
+        """
+        if not self.model:
+            raise ValueError("model은 비어 있을 수 없습니다")
+        if not self.prompt_version:
+            raise ValueError("prompt_version은 비어 있을 수 없습니다")
+
+    def column_values(self) -> dict[str, Any]:
+        """`issue_analyses` 테이블에 넣을 컬럼 값을 만든다.
+
+        Returns:
+            컬럼 이름 -> 값.
+        """
+        return {
+            "issue_id": self.issue_id,
+            "category": self.category,
+            "sentiment": self.sentiment,
+            "model": self.model,
+            "prompt_version": self.prompt_version,
+            "analyzed_at": self.analyzed_at,
         }
 
 
