@@ -15,14 +15,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import (
     Base,
+    CommentRecord,
     ConflictingRecordError,
+    FirstResponseRecord,
     Issue,
+    IssueComment,
+    IssueFirstResponse,
     IssueLabel,
     IssueRecord,
     IssueState,
@@ -30,8 +34,11 @@ from app.models import (
     UpsertOutcome,
     create_db_engine,
     create_session_factory,
+    load_first_response,
     load_sync_cursor,
     save_sync_cursor,
+    upsert_comment,
+    upsert_first_response,
     upsert_issue,
 )
 
@@ -273,6 +280,156 @@ def test_cursors_are_kept_per_repo_and_resource(session: Session):
     assert second is not None
     assert first.since_cursor == CREATED_AT
     assert second.since_cursor == UPDATED_AT
+
+
+# ---------------------------------------------------------------------------
+# issue_comments · issue_first_responses — 행의 존재가 "조사 완료"다 (#8)
+# ---------------------------------------------------------------------------
+
+
+def _comment(**overrides: Any) -> CommentRecord:
+    """기본값이 채워진 코멘트 값 객체."""
+    values: dict[str, Any] = {
+        "id": 9_000_001,
+        "issue_id": 3_288_000_001,
+        "body": "looking into it",
+        "created_at": CREATED_AT + timedelta(hours=2),
+        "author_login": "jlowin",
+        "author_id": 153,
+        "author_type": "User",
+        "author_association": "MEMBER",
+    }
+    values.update(overrides)
+    return CommentRecord(**values)
+
+
+def test_comment_round_trips(session: Session):
+    upsert_issue(session, _record())
+
+    outcome = upsert_comment(session, _comment())
+    session.flush()
+
+    assert outcome is UpsertOutcome.INSERTED
+    stored = session.get(IssueComment, 9_000_001)
+    assert stored is not None
+    assert stored.author_type == "User"
+    assert stored.created_at == CREATED_AT + timedelta(hours=2)
+
+
+def test_recollecting_the_same_comment_keeps_one_row(session: Session):
+    """같은 이슈를 다시 수집하면 같은 코멘트가 다시 온다. 행이 늘면 안 된다."""
+    upsert_issue(session, _record())
+    upsert_comment(session, _comment())
+    upsert_comment(session, _comment(body="edited"))
+    session.flush()
+
+    assert session.scalar(select(func.count()).select_from(IssueComment)) == 1
+    stored = session.get(IssueComment, 9_000_001)
+    assert stored is not None
+    assert stored.body == "edited"
+
+
+def test_comment_for_an_unknown_issue_is_rejected(session: Session):
+    """FK 위반은 UNIQUE 위반과 달리 그대로 올라와야 한다."""
+    with pytest.raises(IntegrityError):
+        upsert_comment(session, _comment(issue_id=999_999))
+        session.flush()
+
+
+def test_unchecked_issue_has_no_row(session: Session):
+    """행이 없다 = 아직 조사하지 않았다."""
+    upsert_issue(session, _record())
+    session.flush()
+
+    assert load_first_response(session, 3_288_000_001) is None
+
+
+def test_no_response_is_stored_as_a_row(session: Session):
+    """조사했는데 응답이 없었던 것은 결측이 아니다. 행으로 남는다."""
+    upsert_issue(session, _record())
+
+    upsert_first_response(
+        session, FirstResponseRecord(issue_id=3_288_000_001, checked_at=UPDATED_AT)
+    )
+    session.flush()
+
+    loaded = load_first_response(session, 3_288_000_001)
+    assert loaded is not None
+    assert loaded.responded is False
+    assert loaded.responded_at is None
+    assert loaded.checked_at == UPDATED_AT
+
+
+def test_first_response_round_trips(session: Session):
+    upsert_issue(session, _record())
+    record = FirstResponseRecord(
+        issue_id=3_288_000_001,
+        checked_at=UPDATED_AT,
+        responded_at=CREATED_AT + timedelta(hours=2),
+        comment_id=9_000_001,
+        responder_login="jlowin",
+    )
+
+    upsert_first_response(session, record)
+    session.flush()
+
+    assert load_first_response(session, 3_288_000_001) == record
+
+
+def test_recheck_overwrites_the_previous_verdict(session: Session):
+    """판별 규칙이 바뀌면 다시 조사한다. 이슈당 행은 하나다."""
+    upsert_issue(session, _record())
+    upsert_first_response(
+        session,
+        FirstResponseRecord(
+            issue_id=3_288_000_001,
+            checked_at=UPDATED_AT,
+            responded_at=CREATED_AT + timedelta(hours=2),
+            comment_id=9_000_001,
+            responder_login="coderabbitai[bot]",
+        ),
+    )
+
+    outcome = upsert_first_response(
+        session, FirstResponseRecord(issue_id=3_288_000_001, checked_at=UPDATED_AT)
+    )
+    session.flush()
+
+    assert outcome is UpsertOutcome.UPDATED
+    assert session.scalar(select(func.count()).select_from(IssueFirstResponse)) == 1
+    loaded = load_first_response(session, 3_288_000_001)
+    assert loaded is not None
+    assert loaded.responded_at is None
+    assert loaded.comment_id is None
+    assert loaded.responder_login is None
+
+
+def test_partially_filled_verdict_is_rejected_before_it_reaches_the_db():
+    """응답 시각만 있고 응답자를 모르는 상태는 데이터가 아니라 판정 로직의 버그다."""
+    with pytest.raises(ValueError, match="함께 있거나 함께 없어야"):
+        FirstResponseRecord(
+            issue_id=3_288_000_001,
+            checked_at=UPDATED_AT,
+            responded_at=CREATED_AT,
+        )
+
+
+def test_the_db_check_also_rejects_a_partial_verdict(session: Session):
+    """값 객체를 우회해도 DB가 막는다. 무결성의 최종 판정자는 제약이다."""
+    upsert_issue(session, _record())
+    session.flush()
+
+    with pytest.raises(IntegrityError):
+        session.execute(
+            insert(IssueFirstResponse).values(
+                issue_id=3_288_000_001,
+                responded_at=CREATED_AT,
+                comment_id=None,
+                responder_login=None,
+                checked_at=UPDATED_AT,
+            )
+        )
+        session.flush()
 
 
 # ---------------------------------------------------------------------------

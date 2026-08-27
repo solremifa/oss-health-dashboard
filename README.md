@@ -7,7 +7,7 @@ LLM 분석으로 보여주는 도구입니다.
 
 분석 대상: [`PrefectHQ/fastmcp`](https://github.com/PrefectHQ/fastmcp)
 
-> **개발 진행 중** — M1(수집 계층) 완료, M2(저장 계층) 진행 중입니다. [진행 상황](#진행-상황) 참고.
+> **개발 진행 중** — M2(저장 계층)까지 완료했습니다. [진행 상황](#진행-상황) 참고.
 
 ## 왜 만들었나
 
@@ -49,9 +49,11 @@ flowchart TB
         CL["client.py<br/>레이트리밋 · 재시도 · ETag"] --> PG["pagination.py<br/>rel=next 추적"]
         PG --> SC["schemas.py<br/>Pydantic v2 검증"]
         SC --> PF["PR 필터<br/>'pull_request' in item"]
+        SC --> CM["comments.py<br/>메인테이너 첫 응답 판별"]
     end
 
     PF --> RP
+    CM --> RP
 
     subgraph models["app/models/"]
         RP["repository.py<br/>upsert"] --> DB[("SQLite<br/>NOT NULL · UNIQUE · FK · CHECK")]
@@ -99,6 +101,15 @@ flowchart TB
 **이슈만 저장하고 PR은 버립니다.** GitHub의 `/issues` 엔드포인트는 PR도 함께
 반환합니다(실측: 한 페이지 100건 중 55건이 PR). 지표 4개가 전부 이슈 기반이라
 PR은 수집 시점에 걸러냅니다.
+
+**"첫 코멘트까지의 시간"은 응답 속도가 아닙니다.** 실측한 이슈 10건에서 첫 코멘트의
+절반이 봇이었습니다. 그대로 재면 응답 속도가 실제보다 극적으로 빨라집니다. 그런데
+**`author_association`만으로는 봇을 거를 수 없습니다** — 그 봇들의 association이 전부
+`CONTRIBUTOR`였기 때문입니다. 사람이지만 저장소와 관계없는 제3자(`NONE`)도 있었습니다.
+
+그래서 메인테이너 첫 응답은 세 조건을 모두 만족해야 합니다: `user.type == "User"`(봇 제외),
+`author_association in {OWNER, MEMBER, COLLABORATOR}`(제3자 제외), 작성자 본인이 아닐 것
+(self-reply 제외). 하나라도 빠지면 지표가 조용히 틀립니다.
 
 이런 식으로 **코드를 쓰기 전에 API를 직접 호출해서 확인한 함정 6가지**를
 [`docs/findings.md`](docs/findings.md)에 정리했습니다.
@@ -182,7 +193,7 @@ _대시보드 구현 후 스크린샷과 GIF가 들어갈 자리입니다._
 | 0단계 | GitHub API 사전 조사 ([findings.md](docs/findings.md)) | 완료 |
 | M0 | 프로젝트 기반 · CI | 완료 |
 | M1 | 수집 계층 (클라이언트 · 페이지네이션 · 검증) | 완료 |
-| M2 | 저장 계층 (모델 · 마이그레이션 · 증분 수집) | 진행 중 |
+| M2 | 저장 계층 (모델 · 마이그레이션 · 증분 수집 · 첫 응답 판별) | 완료 |
 | M3 | 분석 계층 (LLM 분류 · 지표 계산) | 예정 |
 | M4 | API · 대시보드 | 예정 |
 | M5 | 문서 마무리 | 예정 |

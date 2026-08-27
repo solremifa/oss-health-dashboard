@@ -30,7 +30,7 @@ from typing import Annotated, Any, Final, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, ValidationError, field_validator
 
 from app.logging import get_logger
-from app.models import IssueRecord, IssueState
+from app.models import CommentRecord, IssueRecord, IssueState
 
 logger = get_logger(__name__)
 
@@ -263,6 +263,30 @@ class CommentSchema(BaseModel):
             `None`이면 빈 문자열, 아니면 원본 그대로.
         """
         return "" if value is None else value
+
+    def to_record(self, issue_id: int) -> CommentRecord:
+        """저장 계층이 받는 값 객체로 바꾼다.
+
+        이슈 ID는 인자로 받는다. 코멘트 응답에도 `issue_url`이 들어 있지만 어느
+        이슈의 코멘트를 요청했는지는 호출한 쪽이 이미 아는 값이라, URL을 파싱해서
+        되짚을 이유가 없다.
+
+        Args:
+            issue_id: 이 코멘트가 달린 이슈의 GitHub 전역 ID.
+
+        Returns:
+            저장 계층에 넘길 값 객체.
+        """
+        return CommentRecord(
+            id=self.id,
+            issue_id=issue_id,
+            body=self.body,
+            created_at=self.created_at,
+            author_login=self.user.login,
+            author_id=self.user.id,
+            author_type=self.user.type,
+            author_association=self.author_association,
+        )
 
 
 @dataclass(frozen=True)

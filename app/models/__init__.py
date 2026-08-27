@@ -15,12 +15,15 @@ from app.models.base import NAMING_CONVENTION, Base
 from app.models.db import create_db_engine, create_session_factory
 from app.models.enums import IssueState, sa_enum
 from app.models.errors import ConflictingRecordError, RepositoryError
-from app.models.records import IssueRecord, SyncCursor
+from app.models.records import CommentRecord, FirstResponseRecord, IssueRecord, SyncCursor
 from app.models.repository import (
     UpsertOutcome,
     is_unique_violation,
+    load_first_response,
     load_sync_cursor,
     save_sync_cursor,
+    upsert_comment,
+    upsert_first_response,
     upsert_issue,
 )
 from app.models.tables import (
@@ -35,7 +38,9 @@ from app.models.types import UtcDateTime
 __all__ = [
     "NAMING_CONVENTION",
     "Base",
+    "CommentRecord",
     "ConflictingRecordError",
+    "FirstResponseRecord",
     "Issue",
     "IssueComment",
     "IssueFirstResponse",
@@ -50,8 +55,11 @@ __all__ = [
     "create_db_engine",
     "create_session_factory",
     "is_unique_violation",
+    "load_first_response",
     "load_sync_cursor",
     "sa_enum",
     "save_sync_cursor",
+    "upsert_comment",
+    "upsert_first_response",
     "upsert_issue",
 ]
