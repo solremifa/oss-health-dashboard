@@ -31,7 +31,7 @@ from collections.abc import Sequence
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import delete, insert, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -42,6 +42,7 @@ from app.models.records import (
     AnalysisRecord,
     CommentRecord,
     FirstResponseRecord,
+    IssueFacts,
     IssueRecord,
     SyncCursor,
 )
@@ -300,6 +301,61 @@ def load_analysis(session: Session, issue_id: int) -> AnalysisRecord | None:
         prompt_version=row.prompt_version,
         analyzed_at=row.analyzed_at,
     )
+
+
+def load_issue_facts(session: Session, repo_full_name: str) -> list[IssueFacts]:
+    """지표 계산에 필요한 사실을 이슈 단위로 모아 읽는다.
+
+    ## 왜 OUTER JOIN인가
+
+    첫 응답 판정과 LLM 분석은 **이슈보다 늦게, 따로 채워진다.** INNER JOIN을 쓰면
+    아직 조사·분석되지 않은 이슈가 결과에서 통째로 사라지고, 그러면 지표는 이미
+    처리된 이슈만 보고 계산된다 -- 미분석 건수가 0으로 보이고 분모도 함께 줄어
+    **모든 비율이 그럴듯하게 맞는 것처럼 나온다.**
+
+    ## 기간으로 자르지 않는다
+
+    `WINDOW_DAYS`로 거르는 일은 집계(`app/analysis/metrics.py`)가 한다. 여기서도
+    자르면 경계 규칙이 SQL과 파이썬 두 곳에 생기고, 한쪽만 고치는 순간 어긋난다.
+    대상 저장소 한 곳의 이슈는 실측 기준 수천 건 규모라 전량을 읽어도 부담이 없다
+    (`docs/findings.md` 2절).
+
+    Args:
+        session: 사용할 세션.
+        repo_full_name: 대상 저장소.
+
+    Returns:
+        `created_at` 오름차순 이슈별 사실. 저장된 이슈가 없으면 빈 목록.
+    """
+    statement = (
+        select(
+            Issue.id,
+            Issue.created_at,
+            Issue.state,
+            # 행의 존재 여부가 "조사 완료"를 뜻한다. 값이 아니라 NULL 여부를 본다.
+            IssueFirstResponse.issue_id.label("checked_issue_id"),
+            IssueFirstResponse.responded_at,
+            IssueAnalysis.category,
+            IssueAnalysis.sentiment,
+        )
+        .outerjoin(IssueFirstResponse, IssueFirstResponse.issue_id == Issue.id)
+        .outerjoin(IssueAnalysis, IssueAnalysis.issue_id == Issue.id)
+        .where(Issue.repo_full_name == repo_full_name)
+        .order_by(Issue.created_at, Issue.id)
+    )
+
+    return [
+        IssueFacts(
+            issue_id=row.id,
+            created_at=row.created_at,
+            state=row.state,
+            first_response_checked=row.checked_issue_id is not None,
+            responded_at=row.responded_at,
+            category=row.category,
+            sentiment=row.sentiment,
+        )
+        for row in session.execute(statement)
+    ]
 
 
 def load_sync_cursor(session: Session, repo_full_name: str, resource: str) -> SyncCursor | None:

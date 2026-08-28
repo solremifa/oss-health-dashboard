@@ -362,7 +362,22 @@ editable로 설치하므로 `PYTHONPATH` 설정 없이 `app` 패키지가 import
 `[project] dependencies`(런타임) 또는 `[project.optional-dependencies] dev`(개발 전용)에
 반드시 추가하세요.
 
-**아직 없는 것:** 개발 서버 실행 명령, 배포. 도입하면 이 절을 갱신하세요.
+### 개발 서버
+
+```powershell
+# 스키마를 먼저 적용한다. 안 하면 첫 요청이 no such table로 500이 난다.
+.\.venv\Scripts\python.exe -m alembic upgrade head
+
+.\.venv\Scripts\python.exe -m uvicorn app.api.main:app --reload --port 8000
+```
+
+`app/api/main.py`는 **import 시점에 설정을 읽으므로 `.env`가 비어 있으면 기동
+자체가 실패합니다.** 의도한 동작입니다 — 절반쯤 돌다가 401로 죽는 것보다 낫습니다.
+
+지표 엔드포인트는 `GET /api/repos/{owner}/{repo}/metrics`이고, 대화형 문서는
+`/docs`에 있습니다.
+
+**아직 없는 것:** 배포. 도입하면 이 절을 갱신하세요.
 **검증하지 않은 명령을 여기에 적지 마세요.**
 
 ## 13. Claude 작업 규칙

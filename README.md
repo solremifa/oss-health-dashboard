@@ -185,7 +185,25 @@ cp .env.example .env
 .venv/Scripts/python.exe -m pytest
 ```
 
-> 수집·분석·서버 실행 명령은 해당 기능이 구현된 뒤에 추가합니다.
+### 5. 개발 서버
+
+```bash
+.venv/Scripts/python.exe -m alembic upgrade head
+```
+
+```bash
+.venv/Scripts/python.exe -m uvicorn app.api.main:app --reload --port 8000
+```
+
+| 엔드포인트 | 응답 |
+|---|---|
+| `GET /api/repos/{owner}/{repo}/metrics` | 지표 4개 |
+| `GET /docs` | 대화형 API 문서 |
+
+수집 전에는 `200 + status="pending"`, 이 대시보드가 다루지 않는 저장소는 `404`로
+답합니다. **"아직 준비 안 됨"과 "존재하지 않음"을 뭉개지 않습니다.**
+
+> 수집·분석 실행 명령은 해당 기능이 구현된 뒤에 추가합니다.
 > 검증하지 않은 명령은 이 문서에 적지 않습니다.
 
 ## 데모
@@ -202,8 +220,8 @@ _대시보드 구현 후 스크린샷과 GIF가 들어갈 자리입니다._
 | M0 | 프로젝트 기반 · CI | 완료 |
 | M1 | 수집 계층 (클라이언트 · 페이지네이션 · 검증) | 완료 |
 | M2 | 저장 계층 (모델 · 마이그레이션 · 증분 수집 · 첫 응답 판별) | 완료 |
-| M3 | 분석 계층 (LLM 분류 · 지표 계산) | 진행 중 |
-| M4 | API · 대시보드 | 예정 |
+| M3 | 분석 계층 (LLM 분류 · 지표 계산) | 완료 |
+| M4 | API · 대시보드 | 진행 중 (API 완료) |
 | M5 | 문서 마무리 | 예정 |
 
 ## 향후 계획
