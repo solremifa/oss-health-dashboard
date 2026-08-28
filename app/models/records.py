@@ -298,3 +298,94 @@ class SyncCursor:
                 "ETag와 요청 지문은 함께 있어야 합니다: "
                 f"etag={self.etag!r}, request_fingerprint={self.request_fingerprint!r}"
             )
+
+
+@dataclass(frozen=True)
+class IssueFacts:
+    """지표 계산에 필요한 사실만 모은 **조회 결과** 하나.
+
+    ## 왜 저장 계층이 이 모양을 정의하는가
+
+    나머지 record들은 저장 계층이 **받는** 모양이고, 이건 저장 계층이 **내주는**
+    모양이다. 방향만 반대일 뿐 이유는 같다 -- 레이어 의존은 한 방향이라
+    (`analysis → models`) `models`가 `analysis`의 타입을 알 수 없다. 조회 결과의
+    모양을 저장 계층이 정의하고 분석 계층이 거기에 맞춘다.
+
+    세 테이블(`issues` · `issue_first_responses` · `issue_analyses`)에서 온 값이
+    한 줄에 섞여 있지만, **어느 테이블에서 왔는지는 지표에 중요하지 않다.**
+    중요한 것은 "무엇을 아직 모르는가"이고 그건 아래 세 상태로 구분된다.
+
+    ## `None`이 두 가지를 뜻하지 않게 한다
+
+    | 상태 | 표현 |
+    |---|---|
+    | 첫 응답을 아직 조사하지 않음 | `first_response_checked is False` |
+    | 조사했고 메인테이너 응답이 없었음 | `checked is True` + `responded_at is None` |
+    | 조사했고 응답이 있었음 | `checked is True` + `responded_at` 있음 |
+
+    가운데 상태는 결측이 아니라 **보고해야 할 값**이다. 중앙값에서 빼되 건수를
+    드러낸다. 0으로 채우지 않는다(`CLAUDE.md` 2절).
+
+    분석 결과도 같다 -- `category`가 `None`이면 **미분석**이고, 그 건수는 지표
+    응답에 드러난다. 분모에서 조용히 빼지 않는다.
+
+    Attributes:
+        issue_id: 이슈의 GitHub 전역 ID.
+        created_at: 생성 시각. **집계 기간을 자르는 축이다**(`updated_at`이 아니다).
+        state: 열림/닫힘. 방치 판정의 조건 중 하나다.
+        first_response_checked: 첫 응답을 조사했는지 여부.
+            `issue_first_responses`에 행이 있으면 `True`.
+        responded_at: 첫 메인테이너 응답 시각. 조사했지만 응답이 없었으면 `None`.
+        category: LLM 분류. 미분석이면 `None`.
+        sentiment: LLM 감정 톤. 미분석이면 `None`.
+    """
+
+    issue_id: int
+    created_at: datetime
+    state: IssueState
+    first_response_checked: bool = False
+    responded_at: datetime | None = None
+    category: IssueCategory | None = None
+    sentiment: IssueSentiment | None = None
+
+    def __post_init__(self) -> None:
+        """구분해야 할 상태들이 뭉개진 값인지 확인한다.
+
+        전부 "값을 만든 쪽의 버그"이지 데이터가 아니다. 지표 계산 중에 이상한
+        숫자로 나타나는 것보다 값을 만드는 시점에 터지는 편이 원인을 찾기 쉽다.
+
+        Raises:
+            ValueError: 조사하지 않았는데 응답 시각이 있거나, 응답 시각이 생성
+                시각보다 이르거나, `category`와 `sentiment` 중 한쪽만 채워진 경우.
+        """
+        if self.responded_at is not None and not self.first_response_checked:
+            raise ValueError(
+                "조사하지 않은 이슈에 응답 시각이 있을 수 없습니다: "
+                f"issue_id={self.issue_id}, responded_at={self.responded_at!r}"
+            )
+        if self.responded_at is not None and self.responded_at < self.created_at:
+            raise ValueError(
+                "응답 시각이 이슈 생성 시각보다 이릅니다: "
+                f"issue_id={self.issue_id}, created_at={self.created_at!r}, "
+                f"responded_at={self.responded_at!r}"
+            )
+        if (self.category is None) != (self.sentiment is None):
+            raise ValueError(
+                "분류와 감정 톤은 함께 있거나 함께 없어야 합니다: "
+                f"issue_id={self.issue_id}, category={self.category!r}, "
+                f"sentiment={self.sentiment!r}"
+            )
+
+    @property
+    def analyzed(self) -> bool:
+        """LLM 분석이 끝났는지 여부."""
+        return self.category is not None
+
+    @property
+    def responded(self) -> bool:
+        """메인테이너 응답이 확인됐는지 여부.
+
+        **조사하지 않은 이슈도 `False`다.** 이 값만으로 "응답 없음"을 세면
+        미조사가 섞이므로, 세는 쪽은 `first_response_checked`를 함께 본다.
+        """
+        return self.responded_at is not None

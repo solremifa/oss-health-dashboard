@@ -19,6 +19,7 @@ from app.models.records import (
     AnalysisRecord,
     CommentRecord,
     FirstResponseRecord,
+    IssueFacts,
     IssueRecord,
     SyncCursor,
 )
@@ -55,6 +56,7 @@ __all__ = [
     "IssueAnalysis",
     "IssueCategory",
     "IssueComment",
+    "IssueFacts",
     "IssueFirstResponse",
     "IssueLabel",
     "IssueRecord",
