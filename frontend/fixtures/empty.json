@@ -1,0 +1,43 @@
+{
+  "repo": "PrefectHQ/fastmcp",
+  "status": "ready",
+  "generated_at": "2026-08-24T12:00:00Z",
+  "window_days": 180,
+  "issue_count": 0,
+  "stale_issues": {
+    "ratio": null,
+    "stale_count": 0,
+    "open_total": 0,
+    "unchecked_count": 0,
+    "stale_days": 90
+  },
+  "categories": {
+    "counts": {
+      "bug": 0,
+      "feature_request": 0,
+      "question": 0,
+      "other": 0
+    },
+    "ratios": null,
+    "analyzed_count": 0,
+    "unanalyzed_count": 0,
+    "total": 0
+  },
+  "sentiments": {
+    "counts": {
+      "positive": 0,
+      "neutral": 0,
+      "frustrated": 0
+    },
+    "ratios": null,
+    "analyzed_count": 0,
+    "unanalyzed_count": 0,
+    "total": 0
+  },
+  "response_time": {
+    "median_seconds": null,
+    "responded_count": 0,
+    "no_response_count": 0,
+    "unchecked_count": 0
+  }
+}
