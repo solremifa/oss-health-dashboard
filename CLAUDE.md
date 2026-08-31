@@ -63,7 +63,7 @@ GitHub API → collectors → models(DB) → analysis → api → frontend
 | DB | SQLite (초기) → PostgreSQL (추후 이관) |
 | 마이그레이션 | Alembic |
 | 린트·포맷 | ruff |
-| 테스트 | pytest |
+| 테스트 | pytest / 프론트는 `node --test` (Node 내장, npm 의존성 없음) |
 | CI | GitHub Actions |
 | 프론트엔드 | 순수 HTML/JS/CSS + 손으로 쓴 SVG (차트 라이브러리 없음) |
 
@@ -107,10 +107,25 @@ oss-health-dashboard/
 ├── fixtures/            # 실제 API 응답 스냅샷 + 깨진 샘플
 ├── scripts/             # 사람이 직접 실행하는 진입점
 ├── tests/               # app/ 구조를 그대로 반영
-└── frontend/            # index.html / app.js / styles.css
+└── frontend/            # 대시보드. FastAPI가 `/`에 마운트해 함께 내보낸다
+    ├── index.html       # 카드 4장의 골격. 값은 app.js가 채운다
+    ├── app.js           # DOM·SVG 렌더링과 fetch
+    ├── format.js        # 값 → 문자열·치수. DOM을 모르는 순수 함수
+    ├── format.test.js   # 위 파일의 테스트 (`node --test`, npm 의존성 없음)
+    ├── styles.css
+    └── fixtures/        # 화면 상태 확인용 고정 응답 (ready·pending·empty)
 ```
 
 **레이아웃 밖에 파일을 만들지 마세요.** 새 최상위 디렉토리가 필요하면 먼저 물어보세요.
+
+`frontend/`의 파일이 둘로 갈린 이유는 테스트 때문입니다. **DOM을 만지는 코드는
+`node --test`로 검증할 수 없으므로**, 값을 다루는 함수만 `format.js`에 모아
+두고 `app.js`는 그것을 화면에 붙이기만 합니다. 새 계산식을 `app.js`에 직접 쓰지
+마세요 — 그 순간 검증 범위 밖으로 나갑니다.
+
+**`frontend/fixtures/`와 최상위 `fixtures/`는 다른 것입니다.** 앞은 이 대시보드가
+내는 응답의 스냅샷(화면 확인용)이고, 뒤는 GitHub API가 준 응답의 스냅샷(수집
+테스트용)입니다.
 
 ## 5. 레이어 의존 규칙
 
@@ -285,6 +300,21 @@ v1 API는 사용하지 않습니다.
   `create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)`
   없이는 스레드 오류로 터집니다.
 
+### 프론트엔드 테스트
+
+- **`frontend/format.js`의 순수 함수는 `node --test`로 검증합니다.** Node 18+에
+  내장된 러너라 `package.json`도 `node_modules`도 만들지 않습니다. 차트 라이브러리를
+  안 쓰기로 한 이유가 테스트 러너에도 그대로 적용됩니다.
+- **`null`을 0으로 바꾸지 않는지를 가장 먼저 확인합니다.** 지표 계산과 API가
+  지켜 온 규칙이 마지막으로 되살아나 깨지기 쉬운 자리가 화면입니다. `value || 0`
+  한 번이면 빈 저장소가 가장 건강해 보입니다.
+- **`frontend/fixtures/*.json`은 응답 모델과 왕복 비교합니다**(`tests/test_frontend.py`).
+  `model_validate()`만 부르면 Pydantic이 모르는 키를 조용히 버려서, 오타 난
+  스냅샷이 통과하고 화면에서만 `undefined`가 됩니다. 직렬화 결과와 파일을 통째로
+  비교해야 빠진 키와 남는 키가 둘 다 걸립니다.
+- **스냅샷을 손으로 고치지 마세요.** 응답 모델에서 만들어 낸 파일입니다. 모델이
+  바뀌면 새로 생성하고, 위 테스트로 확인합니다.
+
 ## 11. Git / 커밋 규약
 
 ### 이슈 → 브랜치 → PR
@@ -328,7 +358,13 @@ v1 API는 사용하지 않습니다.
 
 # 특정 테스트만
 .\.venv\Scripts\python.exe -m pytest tests/test_config.py -k encoding
+
+# 프론트엔드 테스트 (Node 18+ 내장 러너. 설치할 것 없음)
+node --test "frontend/**/*.test.js"
 ```
+
+`node --test frontend/`처럼 디렉토리를 넘기면 Node가 그것을 모듈로 읽으려다
+`MODULE_NOT_FOUND`로 죽습니다. 글로브 패턴을 따옴표로 감싸서 넘기세요.
 
 ### 마이그레이션 (Alembic)
 
@@ -376,6 +412,30 @@ editable로 설치하므로 `PYTHONPATH` 설정 없이 `app` 패키지가 import
 
 지표 엔드포인트는 `GET /api/repos/{owner}/{repo}/metrics`이고, 대화형 문서는
 `/docs`에 있습니다.
+
+### 대시보드
+
+**같은 프로세스가 화면도 함께 내보냅니다.** `frontend/`가 `/`에 마운트돼 있어
+`http://127.0.0.1:8000/`을 열면 됩니다. 정적 파일 서버를 따로 띄우면 오리진이
+갈려 CORS 설정이 필요해지고, `file://`로 열면 브라우저가 같은 폴더의 JSON
+`fetch`를 막습니다.
+
+```
+http://127.0.0.1:8000/?repo=PrefectHQ/fastmcp   # 실시간 API
+http://127.0.0.1:8000/?fixture=ready            # 고정 스냅샷 — 정상
+http://127.0.0.1:8000/?fixture=pending          # 고정 스냅샷 — 수집 전
+http://127.0.0.1:8000/?fixture=empty            # 고정 스냅샷 — 분모 0
+http://127.0.0.1:8000/?repo=nobody/nothing      # 모르는 저장소 → 404
+```
+
+`?fixture=`는 API를 호출하지 않고 `frontend/fixtures/`의 고정 응답을 읽습니다.
+**`pending`과 `null` 지표는 실제 데이터로 재현하기 까다롭습니다**(수집을 지우거나
+빈 저장소를 골라야 합니다). 이 둘이 화면에서 서로 다르게 보이는지가 대시보드에서
+가장 틀리기 쉬운 부분이라 눈으로 확인할 길을 열어 뒀습니다.
+
+**API 라우터를 정적 파일 마운트보다 먼저 붙입니다.** `/`에 건 마운트는 앞에서
+걸리지 않은 경로를 전부 받으므로, 순서가 바뀌면 `/api/...`와 `/docs`가 통째로
+404가 됩니다. `tests/test_frontend.py`가 이 순서를 고정합니다.
 
 **아직 없는 것:** 배포. 도입하면 이 절을 갱신하세요.
 **검증하지 않은 명령을 여기에 적지 마세요.**

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OSS 헬스체크 대시보드</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!--
+      차트 라이브러리도 프레임워크도 CDN도 없다. 지표가 4개(비율 3 + 시간 1)뿐이라
+      의존성을 더할 이유가 없고, CSP·오프라인·재현성에서 손해다(이슈 #12).
+      막대와 도넛은 아래 app.js가 SVG로 직접 그린다.
+    -->
+    <script type="module" src="./app.js"></script>
+  </head>
+
+  <body>
+    <header class="page-header">
+      <div class="page-header__title">
+        <h1>OSS 헬스체크 대시보드</h1>
+        <p class="repo-name" data-field="repo">저장소를 지정하세요</p>
+      </div>
+
+      <form class="repo-form" data-role="repo-form">
+        <label class="repo-form__label" for="repo-input">저장소</label>
+        <input
+          id="repo-input"
+          class="repo-form__input"
+          name="repo"
+          type="text"
+          placeholder="owner/name"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="repo-form__submit" type="submit">조회</button>
+      </form>
+    </header>
+
+    <!--
+      화면 상태를 눈으로 확인하기 위한 전환기. 고정된 응답 스냅샷을 API 대신
+      읽는다. `pending`과 `null` 지표는 실제 데이터로는 재현하기 까다로운데
+      (수집을 지우거나 빈 저장소를 골라야 한다), 이 둘이 화면에서 서로 다르게
+      보이는지가 이 대시보드에서 가장 틀리기 쉬운 부분이다.
+    -->
+    <nav class="state-switch" aria-label="화면 상태 미리보기">
+      <span class="state-switch__label">화면 상태 확인</span>
+      <a class="state-switch__link" href="./" data-state-link="live">실시간 API</a>
+      <a class="state-switch__link" href="./?fixture=ready" data-state-link="ready">
+        정상 (ready)
+      </a>
+      <a class="state-switch__link" href="./?fixture=pending" data-state-link="pending">
+        수집 전 (pending)
+      </a>
+      <a class="state-switch__link" href="./?fixture=empty" data-state-link="empty">
+        분모 0 (계산 불가)
+      </a>
+      <a class="state-switch__link" href="./?repo=nobody/nothing" data-state-link="not-found">
+        모르는 저장소 (404)
+      </a>
+    </nav>
+
+    <p class="banner" data-role="banner" role="status" hidden></p>
+
+    <main class="grid" data-role="grid" hidden>
+      <!-- 1. 방치된 이슈 비율 -->
+      <section class="card" data-metric="stale">
+        <header class="card__header">
+          <h2 class="card__title">방치된 이슈 비율</h2>
+          <span class="badge" data-field="badge" hidden></span>
+        </header>
+
+        <p class="card__definition" data-field="definition">
+          열려 있고 · 오래됐고 · 메인테이너 응답이 없는 이슈 / 기간 안 open 이슈 전체
+        </p>
+
+        <div class="card__figure" data-field="figure"></div>
+        <p class="card__note" data-field="note" hidden></p>
+        <dl class="counts" data-field="counts"></dl>
+      </section>
+
+      <!-- 2. 버그 vs 기능요청 비율 -->
+      <section class="card" data-metric="categories">
+        <header class="card__header">
+          <h2 class="card__title">버그 vs 기능요청 비율</h2>
+          <span class="badge" data-field="badge" hidden></span>
+        </header>
+
+        <p class="card__definition" data-field="definition">
+          LLM이 분류한 category 분포 / 분석 완료 건수
+        </p>
+
+        <div class="card__figure" data-field="figure"></div>
+        <p class="card__note" data-field="note" hidden></p>
+        <dl class="counts" data-field="counts"></dl>
+      </section>
+
+      <!-- 3. 메인테이너 응답 속도 -->
+      <section class="card" data-metric="response-time">
+        <header class="card__header">
+          <h2 class="card__title">메인테이너 응답 속도</h2>
+          <span class="badge" data-field="badge" hidden></span>
+        </header>
+
+        <p class="card__definition" data-field="definition">
+          median(첫 메인테이너 응답 시각 − 이슈 생성 시각). 봇 · 제3자 · 작성자
+          self-reply는 응답으로 세지 않는다
+        </p>
+
+        <div class="card__figure" data-field="figure"></div>
+        <p class="card__note" data-field="note" hidden></p>
+        <dl class="counts" data-field="counts"></dl>
+      </section>
+
+      <!-- 4. 이슈 감정 톤 분포 -->
+      <section class="card" data-metric="sentiments">
+        <header class="card__header">
+          <h2 class="card__title">이슈 감정 톤 분포</h2>
+          <span class="badge" data-field="badge" hidden></span>
+        </header>
+
+        <p class="card__definition" data-field="definition">
+          LLM이 판정한 sentiment 분포 / 분석 완료 건수
+        </p>
+
+        <div class="card__figure" data-field="figure"></div>
+        <p class="card__note" data-field="note" hidden></p>
+        <dl class="counts" data-field="counts"></dl>
+      </section>
+    </main>
+
+    <footer class="page-footer" data-role="footer" hidden>
+      <p>
+        기준 시각 <strong data-field="generated-at">—</strong> · 집계 기간
+        <strong data-field="window-days">—</strong> · 방치 기준
+        <strong data-field="stale-days">—</strong> · 기간 안 이슈
+        <strong data-field="issue-count">—</strong>
+      </p>
+      <p class="page-footer__caveat">
+        네 숫자를 하나의 헬스 점수로 합치지 않는다 — 가중치에 근거가 없고, 근거가
+        없다는 사실까지 숨긴다. 세지 못한 건수(미분석 · 응답 없음 · 미조사)는 위에
+        그대로 적어 둔다.
+      </p>
+    </footer>
+  </body>
+</html>

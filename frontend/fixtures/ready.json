@@ -1,0 +1,52 @@
+{
+  "repo": "PrefectHQ/fastmcp",
+  "status": "ready",
+  "generated_at": "2026-08-24T12:00:00Z",
+  "window_days": 180,
+  "issue_count": 489,
+  "stale_issues": {
+    "ratio": 0.25555555555555554,
+    "stale_count": 23,
+    "open_total": 90,
+    "unchecked_count": 7,
+    "stale_days": 90
+  },
+  "categories": {
+    "counts": {
+      "bug": 168,
+      "feature_request": 149,
+      "question": 96,
+      "other": 38
+    },
+    "ratios": {
+      "bug": 0.37250554323725055,
+      "feature_request": 0.3303769401330377,
+      "question": 0.21286031042128603,
+      "other": 0.08425720620842572
+    },
+    "analyzed_count": 451,
+    "unanalyzed_count": 38,
+    "total": 489
+  },
+  "sentiments": {
+    "counts": {
+      "positive": 61,
+      "neutral": 302,
+      "frustrated": 88
+    },
+    "ratios": {
+      "positive": 0.1352549889135255,
+      "neutral": 0.6696230598669624,
+      "frustrated": 0.1951219512195122
+    },
+    "analyzed_count": 451,
+    "unanalyzed_count": 38,
+    "total": 489
+  },
+  "response_time": {
+    "median_seconds": 33900.0,
+    "responded_count": 402,
+    "no_response_count": 64,
+    "unchecked_count": 23
+  }
+}

@@ -1,0 +1,561 @@
+/*
+ * 손으로 쓴 CSS. 프레임워크도 빌드 단계도 없다(이슈 #12).
+ *
+ * ## 상태별로 카드 모양이 다르다
+ *
+ * 지표 칸이 비는 이유는 두 가지이고, 화면에서 구분돼야 한다.
+ *
+ * | data-state | 뜻 | 모양 |
+ * |---|---|---|
+ * | `ready`       | 값이 있다                    | 실선 테두리 · 차트 |
+ * | `pending`     | 수집 전. 기다리면 값이 생긴다 | 점선 테두리 · 흐림 · 숫자 없음 |
+ * | `unavailable` | 분모 0. 기다려도 안 생긴다    | 실선 테두리 · 경고색 · **건수는 그대로** |
+ *
+ * `unavailable`에서 건수를 지우지 않는 것이 핵심이다. "open 이슈가 0건이라
+ * 비율을 못 낸다"는 말은 0건이라는 숫자가 같이 있어야 성립한다.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #dfe3e8;
+  --text: #1b1f24;
+  --text-muted: #5c6570;
+  --text-faint: #8a94a0;
+
+  --accent: #2f6feb;
+  --warn: #b26a00;
+  --warn-soft: #fff6e5;
+  --warn-border: #e6c47a;
+  --danger: #c0392f;
+
+  /* 분류 색. 범례와 차트가 같은 변수를 읽는다 -- 두 곳에 색을 적으면 어긋난다. */
+  --cat-bug: #d4503f;
+  --cat-feature_request: #2f6feb;
+  --cat-question: #7d54c9;
+  --cat-other: #8a94a0;
+
+  --sent-positive: #2f8f5b;
+  --sent-neutral: #6b7785;
+  --sent-frustrated: #d4803f;
+
+  --stale-yes: #d4503f;
+  --stale-no: #d8dde3;
+
+  --resp-answered: #2f8f5b;
+  --resp-none: #d4503f;
+  --resp-unchecked: #b9c0c8;
+
+  --radius: 10px;
+  --gap: 1rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16191d;
+    --surface: #1e2227;
+    --border: #333a42;
+    --text: #e8eaed;
+    --text-muted: #a4adb8;
+    --text-faint: #737d88;
+
+    --accent: #6f9bf5;
+    --warn: #e0a548;
+    --warn-soft: #33291a;
+    --warn-border: #6b5527;
+    --danger: #e5776a;
+
+    --cat-bug: #e5776a;
+    --cat-feature_request: #6f9bf5;
+    --cat-question: #a487e0;
+    --cat-other: #737d88;
+
+    --sent-positive: #5cb489;
+    --sent-neutral: #8b96a3;
+    --sent-frustrated: #e0a548;
+
+    --stale-yes: #e5776a;
+    --stale-no: #3a424b;
+
+    --resp-answered: #5cb489;
+    --resp-none: #e5776a;
+    --resp-unchecked: #4a535d;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/*
+ * `hidden` 속성이 클래스에 지지 않게 한다.
+ *
+ * 브라우저 기본 규칙은 `[hidden] { display: none }`이라 특이도가 0-1-0이고,
+ * `.grid { display: grid }`도 0-1-0이다. 뒤에 선언된 쪽이 이기므로 클래스가
+ * 이긴다 -- `element.hidden = true`를 해도 그대로 보인다. 404 화면에서 지표
+ * 카드 껍데기가 남아 있던 원인이 이것이었다.
+ */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  padding: 1.5rem clamp(1rem, 4vw, 3rem) 3rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    "Pretendard", "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+  line-height: 1.55;
+  font-size: 15px;
+}
+
+/* --------------------------------------------------------------------- */
+/* 헤더                                                                    */
+/* --------------------------------------------------------------------- */
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--gap);
+  margin-bottom: 1rem;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+}
+
+.repo-name {
+  margin: 0.15rem 0 0;
+  color: var(--text-muted);
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.repo-form {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.repo-form__label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.repo-form__input {
+  width: 15rem;
+  max-width: 45vw;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.repo-form__submit {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* --------------------------------------------------------------------- */
+/* 상태 전환기 · 배너                                                       */
+/* --------------------------------------------------------------------- */
+
+.state-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+}
+
+.state-switch__label {
+  margin-right: 0.2rem;
+  color: var(--text-faint);
+}
+
+.state-switch__link {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.state-switch__link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.state-switch__link[aria-current="page"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.banner {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 0.9rem;
+}
+
+.banner[data-tone="warn"] {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.banner[data-tone="error"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* --------------------------------------------------------------------- */
+/* 카드                                                                    */
+/* --------------------------------------------------------------------- */
+
+/* 지표가 4개라 2x2가 기본이다. 3열이 되면 넷째 카드만 다음 줄에 혼자 남는다. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(26rem, 1fr));
+  gap: var(--gap);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem 1.1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* 수집 전: 점선 + 흐림. "아직 아무것도 모른다"를 모양으로 말한다. */
+.card[data-state="pending"] {
+  border-style: dashed;
+  background: transparent;
+}
+
+.card[data-state="pending"] .card__title,
+.card[data-state="pending"] .card__definition {
+  color: var(--text-faint);
+}
+
+/* 분모 0: 테두리는 실선 그대로다. 카드가 죽은 게 아니라 비율만 못 낸 것이고,
+   건수는 아래에 그대로 살아 있다. */
+.card[data-state="unavailable"] {
+  border-color: var(--warn-border);
+}
+
+.card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.card__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.card__definition {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.badge {
+  flex-shrink: 0;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.badge[data-state="pending"] {
+  color: var(--text-faint);
+}
+
+.badge[data-state="unavailable"] {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.card__figure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 8.5rem;
+  justify-content: center;
+}
+
+/* 설명 문구. 왜 값이 없는지를 한 줄로 적는다. 두 상태가 서로 다른 문장을 쓴다. */
+.card__note {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.card__note[data-state="pending"] {
+  border: 1px dashed var(--border);
+  color: var(--text-faint);
+}
+
+.card__note[data-state="unavailable"] {
+  border: 1px solid var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* --------------------------------------------------------------------- */
+/* 값 · 건수                                                               */
+/* --------------------------------------------------------------------- */
+
+.headline {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.headline__value {
+  font-size: 2rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.headline__value[data-empty="true"] {
+  color: var(--text-faint);
+}
+
+.headline__unit {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.counts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.6rem;
+  margin: 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.counts dt {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+}
+
+.counts dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 세지 못한 건수. 숨기지 않는 것이 규칙이라 오히려 눈에 띄게 둔다
+   (CLAUDE.md 2절). */
+.counts dt[data-kind="excluded"],
+.counts dd[data-kind="excluded"] {
+  color: var(--warn);
+}
+
+.counts dd[data-kind="excluded"]::after {
+  content: " ⚠";
+  font-size: 0.75em;
+}
+
+.counts dd[data-kind="excluded"][data-zero="true"] {
+  color: var(--text-muted);
+}
+
+.counts dd[data-kind="excluded"][data-zero="true"]::after {
+  content: "";
+}
+
+/* --------------------------------------------------------------------- */
+/* 차트                                                                    */
+/* --------------------------------------------------------------------- */
+
+.donut {
+  display: block;
+  width: 100%;
+  max-width: 8.5rem;
+  margin: 0 auto;
+}
+
+.donut__track {
+  fill: none;
+  stroke: var(--stale-no);
+}
+
+.donut__segment {
+  fill: none;
+  transition: none;
+}
+
+.donut__center {
+  fill: var(--text-muted);
+  font-size: 0.22rem;
+  font-weight: 600;
+  text-anchor: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.donut__center[data-empty="true"] {
+  fill: var(--text-faint);
+}
+
+.donut-layout {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.donut-layout > .donut {
+  flex: 0 0 7rem;
+  margin: 0;
+}
+
+.legend {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.legend__row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.legend__swatch {
+  flex: 0 0 auto;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 3px;
+}
+
+.legend__name {
+  flex: 1;
+  color: var(--text-muted);
+}
+
+.legend__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr 4.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.bar-row__name {
+  color: var(--text-muted);
+}
+
+.bar-row__track {
+  height: 0.7rem;
+  border-radius: 3px;
+  background: var(--stale-no);
+  overflow: hidden;
+}
+
+.bar-row__fill {
+  height: 100%;
+  border-radius: 3px;
+}
+
+.bar-row__value {
+  text-align: right;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 응답 · 무응답 · 미조사를 한 줄에 쌓는다. 중앙값에 들어간 건수와 빠진 건수의
+   비중이 한눈에 보여야 "median만 보고 판단하면 안 된다"가 전달된다. */
+.stack {
+  display: flex;
+  width: 100%;
+  height: 0.9rem;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--stale-no);
+}
+
+.stack__part {
+  height: 100%;
+}
+
+.stack__part[data-zero="true"] {
+  display: none;
+}
+
+/* --------------------------------------------------------------------- */
+/* 푸터                                                                    */
+/* --------------------------------------------------------------------- */
+
+.page-footer {
+  margin-top: 1.2rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.page-footer p {
+  margin: 0 0 0.35rem;
+}
+
+.page-footer__caveat {
+  color: var(--text-faint);
+  max-width: 60ch;
+}
+
+.page-footer strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
